@@ -48,6 +48,18 @@ function send(m) { if (state.ws && state.ws.readyState === 1) state.ws.send(JSON
   const r = +load('radius'); if (r >= 100 && r <= 1000) state.radius = r;
 })();
 
+function micErrorText(err) {
+  const name = err && err.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return isIOS
+      ? 'Safari ha bloccato il microfono per questo sito. Tocca l\'icona a sinistra dell\'indirizzo → Impostazioni sito web → Microfono: Consenti. Poi ricarica la pagina.'
+      : 'Il browser ha bloccato il microfono per questo sito. Tocca il lucchetto o l\'icona accanto all\'indirizzo, consenti il microfono e ricarica la pagina.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'Non trovo nessun microfono su questo dispositivo.';
+  if (name === 'NotReadableError' || name === 'AbortError') return 'Il microfono è occupato da un\'altra app, per esempio una chiamata in corso. Chiudila e riprova.';
+  return `Non riesco ad attivare il microfono (${name || 'errore sconosciuto'}). Ricarica la pagina e riprova.`;
+}
+
 function joinError(msg) { const e = $('#joinError'); e.textContent = msg; e.hidden = !msg; }
 
 $('#joinForm').addEventListener('submit', async e => {
@@ -59,13 +71,13 @@ $('#joinForm').addEventListener('submit', async e => {
   if (!('geolocation' in navigator)) return joinError('Questo browser non può leggere la posizione.');
 
   const btn = $('#joinBtn'); btn.disabled = true; joinError('');
-  try { state.ctx = new (window.AudioContext || window.webkitAudioContext)(); await state.ctx.resume(); } catch { state.ctx = null; }
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-  } catch {
+  } catch (err) {
     btn.disabled = false;
-    return joinError('Senza microfono non puoi entrare in chiamata. Consenti il microfono nelle impostazioni del browser per questo sito e riprova.');
+    return joinError(micErrorText(err));
   }
+  try { state.ctx = new (window.AudioContext || window.webkitAudioContext)(); await state.ctx.resume(); } catch { state.ctx = null; }
   state.micTrack = state.stream.getAudioTracks()[0];
   state.micTrack.addEventListener('mute', () => { if (away) away.micMuted = true; renderDiag(); });
   state.micTrack.addEventListener('ended', () => { if (away) away.micEnded = true; renderDiag(); });
@@ -84,6 +96,7 @@ $('#joinForm').addEventListener('submit', async e => {
   $('#radius').value = state.radius; $('#radiusOut').textContent = fmtR(state.radius);
   $('#joinView').hidden = true; $('#callView').hidden = false;
 
+  initMap();
   startGeo();
   startPip();
   connect();
@@ -160,7 +173,7 @@ function handle(m) {
       for (const info of m.peers) {
         seen.add(info.id);
         const p = peer(info.id);
-        Object.assign(p, { name: info.name, distance: info.distance, linked: info.linked, paused: info.paused, hasPos: info.hasPos });
+        Object.assign(p, { name: info.name, distance: info.distance, linked: info.linked, paused: info.paused, hasPos: info.hasPos, lat: info.lat, lon: info.lon });
         applyVolume(p);
       }
       for (const id of [...state.peers.keys()]) if (!seen.has(id)) { closePeer(id); state.peers.delete(id); }
@@ -286,7 +299,7 @@ const liveCount = () => [...state.peers.values()].filter(p => peerStatus(p)[0] =
 function statusText() {
   const n = liveCount(), total = state.peers.size;
   if (!state.wsOk) return ['Connessione al server…', 'Se non si collega, controlla la connessione internet.'];
-  if (state.paused) return ['In pausa', 'Non entri in nessuna chiamata e gli altri non vedono la tua distanza.'];
+  if (state.paused) return ['In pausa', 'Non entri in nessuna chiamata e non compari sulla mappa degli altri.'];
   if (!state.lastPos) return ['Cerco la tua posizione…', state.geoError || 'Può servire qualche secondo, meglio all\'aperto.'];
   if (n > 0) return [`In chiamata con ${n} ${n === 1 ? 'persona' : 'persone'}`,
     isIOS ? 'Su iPhone il volume non cambia con la distanza.' : 'Il volume scende con la distanza.'];
@@ -310,6 +323,7 @@ function render() {
       <div class="meter" aria-hidden="true"><i></i></div></li>`;
   }).join('');
   $('#emptyRoom').hidden = state.peers.size > 0 || !state.wsOk;
+  updateMap();
   updateMediaSession(title);
   renderDiag();
 }
@@ -321,6 +335,79 @@ function tickLevels() {
     if (!li) continue;
     li.querySelector('.meter i').style.width = `${Math.round(clamp(p.level * 600, 0, 100))}%`;
     li.querySelector('.av').classList.toggle('speaking', p.level > 0.03);
+    const pin = map.markers.get(p.id)?.getElement()?.querySelector('.pin');
+    if (pin) pin.classList.toggle('speaking', p.level > 0.03);
+  }
+}
+
+/* ---------------- mappa ---------------- */
+const map = { m: null, me: null, radius: null, margin: null, markers: new Map(), lines: new Map(), follow: true, fitted: false, lastHere: null };
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function initMap() {
+  if (!window.L) { $('#mapHint').textContent = 'Mappa non disponibile: controlla la connessione e ricarica la pagina.'; return; }
+  map.m = L.map('map', { zoomControl: true }).setView([41.9, 12.5], 6);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map.m);
+  map.m.on('dragstart', () => { map.follow = false; $('#recenterBtn').hidden = false; });
+  $('#recenterBtn').addEventListener('click', () => { map.follow = true; $('#recenterBtn').hidden = true; fitRadius(); });
+  setTimeout(() => map.m.invalidateSize(), 100);
+}
+
+function fitRadius() { if (map.m && map.margin) map.m.fitBounds(map.margin.getBounds(), { padding: [8, 8] }); }
+
+function pinIcon(cls, letter, label) {
+  return L.divIcon({
+    className: '', iconSize: [0, 0],
+    html: `<div class="pin ${cls}"><div class="dot">${esc(letter)}</div>${label ? `<div class="lbl">${esc(label)}</div>` : ''}</div>`,
+  });
+}
+
+function updateMap() {
+  if (!map.m || !state.lastPos) return;
+  const here = [state.lastPos.lat, state.lastPos.lon];
+  const accent = cssVar('--accent'), warn = cssVar('--warn'), live = cssVar('--live');
+  const outer = state.radius * (1 + state.exitMargin);
+
+  if (!map.me) {
+    map.radius = L.circle(here, { radius: state.radius, color: accent, weight: 2, fillColor: accent, fillOpacity: 0.08, interactive: false }).addTo(map.m);
+    map.margin = L.circle(here, { radius: outer, color: warn, weight: 1.5, dashArray: '6 6', fill: false, interactive: false }).addTo(map.m);
+    map.me = L.marker(here, { icon: pinIcon('me', 'Tu'), zIndexOffset: 1000, keyboard: false }).addTo(map.m);
+    $('#mapHint').hidden = true;
+  }
+  map.me.setLatLng(here);
+  map.radius.setLatLng(here).setRadius(state.radius);
+  map.margin.setLatLng(here).setRadius(outer);
+  if (!map.fitted) { fitRadius(); map.fitted = true; }
+  else if (map.follow && (!map.lastHere || distM({ lat: here[0], lon: here[1] }, map.lastHere) > 5)) map.m.panTo(here);
+  map.lastHere = { lat: here[0], lon: here[1] };
+
+  const seen = new Set();
+  for (const p of state.peers.values()) {
+    if (p.lat == null || p.lon == null) continue;
+    seen.add(p.id);
+    const [cls] = peerStatus(p), ll = [p.lat, p.lon], key = cls + '|' + p.name;
+    let mk = map.markers.get(p.id);
+    if (!mk) {
+      mk = L.marker(ll, { icon: pinIcon(cls, (p.name[0] || '?').toUpperCase(), p.name), keyboard: false }).addTo(map.m);
+      mk._key = key; map.markers.set(p.id, mk);
+    } else {
+      mk.setLatLng(ll);
+      if (mk._key !== key) { mk.setIcon(pinIcon(cls, (p.name[0] || '?').toUpperCase(), p.name)); mk._key = key; }
+    }
+    let ln = map.lines.get(p.id);
+    if (cls === 'live' || cls === 'connecting') {
+      const color = cls === 'live' ? live : warn;
+      if (!ln) { ln = L.polyline([here, ll], { color, weight: 2, opacity: 0.7, interactive: false }).addTo(map.m); map.lines.set(p.id, ln); }
+      else { ln.setLatLngs([here, ll]); ln.setStyle({ color }); }
+    } else if (ln) { ln.remove(); map.lines.delete(p.id); }
+  }
+  for (const [id, mk] of map.markers) {
+    if (seen.has(id)) continue;
+    mk.remove(); map.markers.delete(id);
+    const ln = map.lines.get(id); if (ln) { ln.remove(); map.lines.delete(id); }
   }
 }
 
@@ -359,6 +446,7 @@ $('#radius').addEventListener('change', () => {
   send({ t: 'settings', radius: state.radius }); store('radius', state.radius);
   for (const p of state.peers.values()) applyVolume(p);
   render();
+  if (map.follow) fitRadius();
 });
 $('#shareBtn').addEventListener('click', async e => {
   const btn = e.currentTarget;

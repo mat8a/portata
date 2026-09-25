@@ -10,6 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -28,7 +29,7 @@
         <input id="room" name="room" maxlength="20" required minlength="3" placeholder="AMICI42" autocapitalize="characters" spellcheck="false">
         <p class="hint">Chi usa lo stesso codice può sentirti quando è vicino. Condividilo solo con chi vuoi.</p>
         <button class="primary" type="submit" id="joinBtn">Entra</button>
-        <p class="hint">Ti chiederà il permesso per microfono e posizione. Gli altri vedono solo la tua distanza, mai dove sei.</p>
+        <p class="hint">Ti chiederà il permesso per microfono e posizione. Chi è nella stanza ti vede sulla mappa; con Pausa sparisci.</p>
         <p class="error" id="joinError" role="alert" hidden></p>
       </form>
     </section>
@@ -42,6 +43,12 @@
         </div>
         <button class="ghost" id="shareBtn" type="button">Invita</button>
       </header>
+
+      <section class="mapcard" aria-label="Mappa">
+        <div id="map"></div>
+        <button class="recenter" id="recenterBtn" type="button" hidden>Centra su di me</button>
+        <p class="maphint" id="mapHint">La mappa compare appena arriva la tua posizione.</p>
+      </section>
 
       <section class="card status" id="statusCard">
         <h2><span class="pulse"></span><span id="statusTitle">Cerco la tua posizione…</span></h2>
@@ -87,6 +94,7 @@
 
   <div id="audioSinks" hidden></div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

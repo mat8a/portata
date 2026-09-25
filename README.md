@@ -12,8 +12,9 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
 - L'audio passa **direttamente da telefono a telefono** (WebRTC). Il server fa solo da centralino,
   quindi non serve un servizio audio a pagamento. Regge bene fino a 5–6 persone in chiamata insieme.
 - Per non entrare e uscire di continuo sul confine, si esce solo oltre il raggio + 10%.
-- **Privacy:** le coordinate restano sul server e non vengono salvate. Gli altri vedono solo il tuo
-  nome e la distanza, arrotondata a 10 m. Con "Pausa" smetti di comparire a tutti.
+- **Mappa:** chi è nella stessa stanza ti vede sulla mappa (OpenStreetMap), insieme al cerchio
+  da 1 km. Le posizioni non vengono salvate da nessuna parte e non arrivano a chi non ha il codice.
+  Con "Pausa" sparisci dalla mappa e dalle chiamate.
 
 ## File
 

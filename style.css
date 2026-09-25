@@ -92,5 +92,24 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:10px 0}
 .away li.good{border-color:var(--live)} .away li.bad{border-color:var(--bad)} .away li.mixed{border-color:var(--warn)}
 .away b{display:block}
 
+/* mappa */
+.mapcard{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+#map{height:min(58vh,440px);width:100%;background:var(--surface-2)}
+.maphint{position:absolute;inset:auto 12px 12px 12px;margin:0;padding:8px 12px;border-radius:8px;background:var(--surface);color:var(--ink-2);font-size:13.5px;z-index:500;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.recenter{position:absolute;top:10px;right:10px;z-index:500;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:7px 12px;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+@media (prefers-color-scheme: dark){
+  .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6)}
+  .leaflet-control-attribution{background:rgba(20,28,34,.8)!important;color:var(--ink-2)!important}
+  .leaflet-control-attribution a{color:var(--accent)!important}
+  .leaflet-bar a{background:var(--surface);color:var(--ink);border-color:var(--line)}
+}
+.pin{position:relative;width:0;height:0}
+.pin .dot{position:absolute;left:-15px;top:-15px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:700 14px/1 var(--font-b);background:var(--surface);color:var(--ink);border:2px solid var(--ink-2);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.pin .lbl{position:absolute;top:17px;left:50%;transform:translateX(-50%);white-space:nowrap;font:600 12px/1.2 var(--font-b);color:var(--ink);text-shadow:0 0 3px var(--surface),0 0 3px var(--surface),0 0 3px var(--surface)}
+.pin.live .dot{background:var(--live);border-color:var(--live);color:var(--on-state)}
+.pin.connecting .dot{border-color:var(--warn);color:var(--warn)}
+.pin.me .dot{background:var(--accent);border-color:#fff;color:var(--accent-ink);width:34px;height:34px;left:-17px;top:-17px;font-size:12px;box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 25%,transparent)}
+.pin.speaking .dot::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--live);animation:sp 1s ease-out infinite}
+
 .leave{border:0;background:none;color:var(--bad);padding:12px;font-weight:600;cursor:pointer}
 @media (prefers-reduced-motion:reduce){.is-live .pulse,.av.speaking::after{animation:none}}

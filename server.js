@@ -1,7 +1,7 @@
 // Portata — server
 // Serve la web app, tiene le stanze, calcola le distanze e fa da "centralino"
-// per collegare i telefoni tra loro con WebRTC. Non inoltra mai le coordinate:
-// ai client arrivano solo nomi e distanze.
+// per collegare i telefoni tra loro con WebRTC. Le posizioni arrivano solo a chi è
+// nella stessa stanza, per la mappa; chi è in pausa non viene mostrato. Nulla viene salvato.
 
 const http = require('http');
 const fs = require('fs');
@@ -106,7 +106,11 @@ function evaluate(code) {
   for (const me of list) {
     const peers = list.filter(o => o !== me).map(o => {
       const d = dists.get(me.id + '|' + o.id);
+      const showPos = hasFreshPos(o) && !o.paused;
       return {
+        lat: showPos ? +o.pos.lat.toFixed(5) : null,
+        lon: showPos ? +o.pos.lon.toFixed(5) : null,
+        acc: showPos ? Math.round(o.pos.acc) : null,
         id: o.id,
         name: o.name,
         distance: d == null ? null : Math.max(10, Math.round(d / 10) * 10),
