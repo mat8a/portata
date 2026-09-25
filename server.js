@@ -27,6 +27,14 @@ if (process.env.ICE_SERVERS) {
   try { ICE = JSON.parse(process.env.ICE_SERVERS); }
   catch (e) { console.error('ICE_SERVERS non è un JSON valido, uso solo STUN'); }
 }
+// Modo semplice: bastano utente e password del server TURN (di default quelli di Metered).
+if (process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+  const urls = (process.env.TURN_URLS ||
+    'turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:80?transport=tcp,turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  ICE.push({ urls, username: process.env.TURN_USERNAME.trim(), credential: process.env.TURN_CREDENTIAL.trim() });
+  console.log(`TURN attivo: ${urls.length} indirizzi`);
+}
 
 /* ---------------- file statici ---------------- */
 const TYPES = {

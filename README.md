@@ -93,10 +93,18 @@ Cosa aspettarsi, da verificare sul tuo telefono:
 
 ## Se due persone vicine non si collegano
 
-Se compare "Collegamento non riuscito", di solito è la rete mobile che blocca i collegamenti
-diretti. Serve un server TURN che faccia da ponte (per esempio il piano gratuito di
-[Metered](https://www.metered.ca/stun-turn)). Aggiungi le sue credenziali nella variabile
-d'ambiente `ICE_SERVERS` (su Render: *Environment*):
+Se resta su "Collegamento…" o compare "Collegamento non riuscito", di solito è la rete mobile
+(4G/5G) che blocca i collegamenti diretti tra telefoni. Serve un server TURN che faccia da ponte,
+per esempio il piano gratuito di [Metered](https://www.metered.ca/stun-turn).
+
+Modo semplice, con Metered: su Render apri il servizio → *Environment* e aggiungi due variabili
+con utente e password che trovi nella dashboard di Metered:
+
+- `TURN_USERNAME` = il nome utente
+- `TURN_CREDENTIAL` = la password
+
+Con un altro servizio TURN aggiungi anche `TURN_URLS` (indirizzi separati da virgola), oppure
+scrivi tutto in `ICE_SERVERS` come JSON:
 
 ```json
 [{"urls":"stun:stun.l.google.com:19302"},
