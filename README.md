@@ -1,1 +1,110 @@
-# portata
+# Portata
+
+Web app per restare in chiamata con i contatti che si trovano entro 1 km da te.
+Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritrovano con un
+**codice stanza** (per esempio `AMICI42`): solo chi usa lo stesso codice può sentirti.
+
+## Come funziona
+
+- Il telefono legge la posizione dal GPS e la manda al server ogni pochi secondi, quando ti muovi.
+- Il server calcola le distanze tra le persone della stanza. Quando due persone sono più vicine
+  del raggio (1 km, o meno se lo abbassi), dice ai due telefoni di collegarsi.
+- L'audio passa **direttamente da telefono a telefono** (WebRTC). Il server fa solo da centralino,
+  quindi non serve un servizio audio a pagamento. Regge bene fino a 5–6 persone in chiamata insieme.
+- Per non entrare e uscire di continuo sul confine, si esce solo oltre il raggio + 10%.
+- **Privacy:** le coordinate restano sul server e non vengono salvate. Gli altri vedono solo il tuo
+  nome e la distanza, arrotondata a 10 m. Con "Pausa" smetti di comparire a tutti.
+
+## File
+
+| File | Cosa fa |
+|---|---|
+| `server.js` | Server Node: pagine, stanze, distanze, collegamenti WebRTC |
+| `index.html`, `style.css` | Interfaccia |
+| `app.js` | Posizione, microfono, chiamata, mini finestra, diagnostica |
+| `render.yaml` | Configurazione per pubblicarla su Render |
+
+In questa versione tutti i file stanno nella stessa cartella, così si possono caricare su GitHub
+anche dal telefono.
+
+## Provarla
+
+Microfono e posizione funzionano solo su pagine **https://**. Hai due strade.
+
+### A. Prova veloce dal tuo computer (10 minuti)
+
+Serve [Node.js](https://nodejs.org) 18 o più recente.
+
+```bash
+cd portata
+npm install
+npm start          # parte su http://localhost:3000
+```
+
+Sul computer puoi già aprire `http://localhost:3000`. Per i telefoni serve un indirizzo https:
+il modo più semplice è un tunnel di Cloudflare, gratuito e senza account.
+
+```bash
+# Mac: brew install cloudflared    Windows: winget install Cloudflare.cloudflared
+cloudflared tunnel --url http://localhost:3000
+```
+
+Stampa un indirizzo tipo `https://qualcosa.trycloudflare.com`: aprilo sui telefoni.
+Funziona finché il computer e il comando restano accesi.
+
+### B. Online sempre raggiungibile (Render, gratis)
+
+1. Carica la cartella `portata` in un nuovo repository su GitHub.
+2. Su [render.com](https://render.com) scegli **New → Blueprint** e seleziona il repository:
+   legge `render.yaml` e configura tutto da solo.
+3. Dopo qualche minuto hai un indirizzo `https://portata-xxxx.onrender.com`.
+
+Nel piano gratuito il server si addormenta dopo 15 minuti senza nessuno collegato: il primo
+accesso dopo una pausa impiega circa 30 secondi.
+
+### Metterla sulla schermata Home
+
+- **iPhone:** in Safari, pulsante Condividi → *Aggiungi alla schermata Home*.
+- **Android:** in Chrome, menu ⋮ → *Aggiungi a schermata Home* (o *Installa app*).
+
+## Provare la mini finestra (PiP) e il secondo piano
+
+La web app funziona bene con la pagina aperta. Il punto da verificare è cosa succede quando
+cambi app. La sezione **Diagnostica secondo piano** serve proprio a questo.
+
+1. Entrate in due nella stessa stanza, vicini, e controllate di sentirvi.
+2. Sul telefono da provare tocca **Mini finestra**.
+3. Passa a un'altra app per almeno 30 secondi, e intanto l'altra persona parla.
+4. Torna in Portata. In Diagnostica trovi una riga come:
+   *Fuori per 45 s · mini finestra aperta — Posizione aggiornata 6 volte, Microfono sempre attivo,
+   Collegamento al server mantenuto.*
+5. Ripeti senza mini finestra e con **Schermo sempre acceso**, per confrontare.
+
+Cosa aspettarsi, da verificare sul tuo telefono:
+
+- **Android (Chrome):** di solito la chiamata continua in secondo piano. La posizione può
+  rallentare o fermarsi.
+- **iPhone (Safari):** Safari tende a silenziare il microfono quando la pagina va in secondo piano,
+  anche con la mini finestra aperta. Se la diagnostica dice "Microfono interrotto dal sistema",
+  su iPhone serve l'app nativa per usarla con il telefono in tasca.
+- **Schermo sempre acceso** è il piano B più affidabile: la pagina resta in primo piano,
+  a costo di più batteria.
+
+## Se due persone vicine non si collegano
+
+Se compare "Collegamento non riuscito", di solito è la rete mobile che blocca i collegamenti
+diretti. Serve un server TURN che faccia da ponte (per esempio il piano gratuito di
+[Metered](https://www.metered.ca/stun-turn)). Aggiungi le sue credenziali nella variabile
+d'ambiente `ICE_SERVERS` (su Render: *Environment*):
+
+```json
+[{"urls":"stun:stun.l.google.com:19302"},
+ {"urls":"turn:INDIRIZZO:80","username":"UTENTE","credential":"PASSWORD"}]
+```
+
+## Limiti noti
+
+- Su iPhone il volume non scende con la distanza: Safari non permette alle pagine di cambiarlo.
+- Massimo 12 persone per stanza. Oltre le 5–6 persone nella stessa chiamata i collegamenti diretti
+  pesano sulla batteria e sulla rete: per gruppi grandi conviene un server audio come LiveKit.
+- Le stanze vivono in memoria: se il server si riavvia, i telefoni si ricollegano da soli.
