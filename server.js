@@ -48,6 +48,7 @@ const TYPES = {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/health') { res.writeHead(200); return res.end('ok'); }
+  if (url.pathname === '/geocode') return geocode(url, res);
   const rel = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
   const file = path.normalize(path.join(PUBLIC, rel));
   if (path.dirname(file) !== PUBLIC || !SERVED.has(path.basename(file))) { res.writeHead(404); return res.end('Non trovato'); }
@@ -61,6 +62,81 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
+
+/* ---------------- ricerca indirizzi ---------------- */
+// Usa Photon (OpenStreetMap, pensato per la ricerca mentre scrivi) e, se non risponde,
+// Nominatim. Le risposte restano in memoria per un po' per non ripetere le stesse richieste.
+const PHOTON_URL = process.env.PHOTON_URL || 'https://photon.komoot.io/api/';
+const NOMINATIM_URL = process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org/search';
+const UA = 'Portata/0.3 (chiamata di prossimita; https://github.com)';
+const geoCache = new Map();
+
+function json(res, obj, status = 200) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+
+async function geocode(url, res) {
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
+  const lat = parseFloat(url.searchParams.get('lat')), lon = parseFloat(url.searchParams.get('lon'));
+  const near = validLatLon(lat, lon);
+  if (q.length < 2) return json(res, { results: [] });
+  const key = q.toLowerCase() + '|' + (near ? `${lat.toFixed(2)},${lon.toFixed(2)}` : '');
+  const hit = geoCache.get(key);
+  if (hit && Date.now() - hit.ts < 30 * 60 * 1000) return json(res, { results: hit.results });
+
+  let results;
+  try { results = await photon(q, near && lat, near && lon); }
+  catch (e1) {
+    try { results = await nominatim(q, near && lat, near && lon); }
+    catch (e2) {
+      console.error('ricerca non riuscita:', e1.message, '/', e2.message);
+      return json(res, { results: [], error: 'Ricerca non disponibile al momento. Riprova tra poco o scegli il punto sulla mappa.' }, 502);
+    }
+  }
+  if (geoCache.size > 500) geoCache.delete(geoCache.keys().next().value);
+  geoCache.set(key, { ts: Date.now(), results });
+  json(res, { results });
+}
+
+async function getJson(u) {
+  const r = await fetch(u, { headers: { 'User-Agent': UA, 'Accept-Language': 'it' }, signal: AbortSignal.timeout(6000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function photon(q, lat, lon) {
+  const u = new URL(PHOTON_URL);
+  u.searchParams.set('q', q);
+  u.searchParams.set('limit', '7');
+  if (lat !== false && lat != null) { u.searchParams.set('lat', lat); u.searchParams.set('lon', lon); }
+  const j = await getJson(u);
+  const seen = new Set();
+  return (j.features || []).map(f => {
+    const p = f.properties || {};
+    const [flon, flat] = (f.geometry && f.geometry.coordinates) || [];
+    const street = [p.street, p.housenumber].filter(Boolean).join(' ');
+    const name = p.name || street || p.city || '';
+    const detail = [p.name && street ? street : null, p.postcode, p.city || p.town || p.village || p.county, p.country]
+      .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && v !== name).join(', ');
+    return { name, detail, lat: +flat, lon: +flon };
+  }).filter(r => r.name && validLatLon(r.lat, r.lon) && !seen.has(r.name + r.detail) && seen.add(r.name + r.detail));
+}
+
+async function nominatim(q, lat, lon) {
+  const u = new URL(NOMINATIM_URL);
+  u.searchParams.set('format', 'jsonv2');
+  u.searchParams.set('q', q);
+  u.searchParams.set('limit', '7');
+  u.searchParams.set('accept-language', 'it');
+  if (lat !== false && lat != null) u.searchParams.set('viewbox', `${lon - 0.3},${lat + 0.3},${lon + 0.3},${lat - 0.3}`);
+  const j = await getJson(u);
+  return (j || []).map(r => {
+    const parts = String(r.display_name || '').split(',').map(s => s.trim());
+    const name = r.name || parts[0] || '';
+    return { name, detail: parts.slice(r.name ? 1 : 1, 4).join(', '), lat: +r.lat, lon: +r.lon };
+  }).filter(r => r.name && validLatLon(r.lat, r.lon));
+}
 
 /* ---------------- stanze ---------------- */
 // rooms: codice -> { clients: Map(id -> client), dest: {lat,lon,label,byName,ts} | null }

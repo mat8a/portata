@@ -21,21 +21,35 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
 - **Microfono:** tocca per spegnerlo o riaccenderlo.
 - **Premi per parlare** (impostazioni): il microfono diventa "Tieni premuto"; gli altri ti sentono
   solo mentre lo tieni schiacciato.
+- **Microfono spento = microfono libero:** quando il microfono è spento (muto, premi per parlare a
+  riposo, modalità musica) Portata lo restituisce al telefono, così la musica può suonare.
 - **Musica:** metti in pausa il tuo microfono e restituisce l'audio al telefono, così puoi far
   partire Spotify o Apple Music e continuare a sentire gli altri sopra la musica. Per parlare tocchi
   (o tieni premuto) il microfono: iPhone ferma la musica mentre parli. Quando lasci, il microfono si
   libera; se la musica non riparte da sola, premi play dal Centro di Controllo. Se fai partire la
   musica mentre sei in chiamata, Portata se ne accorge e passa da sola alla modalità musica.
   Mescolare musica e voci richiede iOS 17 o successivo; va provato sul proprio telefono.
-- **Meta:** scegli un punto sulla mappa (o la tua posizione), dagli un nome e condividilo. Tutti nella
-  stanza lo vedono, con la distanza di ognuno e il tasto **Vai** che apre le indicazioni a piedi
-  in Mappe (iPhone) o Google Maps. Chiunque può cambiarla o toglierla.
+- **Meta:** cerca un indirizzo o un posto (i risultati vicini a te vengono prima), oppure tocca un
+  punto sulla mappa o usa la tua posizione; dagli un nome e condividilo. Tutti nella stanza la
+  vedono, con la distanza di ognuno. Chiunque può cambiarla o toglierla. La ricerca usa
+  OpenStreetMap (Photon, e Nominatim come riserva) tramite il server, senza chiavi da configurare.
+- **Vai:** apre le indicazioni per la meta. La prima volta scegli l'app (Apple Mappe, Google Maps,
+  Waze) e come ci vai (a piedi, in auto, con i mezzi); con "Ricorda la scelta" le volte dopo si apre
+  direttamente. Si cambia in Impostazioni → App per le indicazioni.
 - **Tasti del volante e delle cuffie** (impostazioni, attivo di serie): il tasto play/pausa del
   volante (via Bluetooth), delle cuffie o degli AirPods accende e spegne il microfono. Sullo schermo
   dell'auto compare lo stato ("Microfono acceso · In chiamata con Giulia"). Funziona quando l'audio
   in riproduzione è Portata: se sta suonando Spotify, il tasto va a Spotify. Il tasto
   "rispondi/riaggancia" e CarPlay non sono raggiungibili da una web app.
-- **Mini:** apre la mini finestra (Picture in Picture) con chi è in chiamata.
+- **Stile della mappa** (icona a strati in alto): Standard (chiara e pulita, simile a Google Maps),
+  Scura, Satellite. Le mappe vengono da CARTO e, per il satellite, da Esri: sono
+  gratuite per un uso personale leggero; per un'app pubblica con molti utenti serve un piano con
+  chiave (per esempio MapTiler o Stadia Maps).
+- **Persone** (in alto a sinistra): toccane una per centrare la mappa su di lei. Con il tasto
+  altoparlante accanto a chi è in chiamata la silenzi solo per te (lei continua a sentirti);
+  la scelta si ricorda. Tutti gli altri si sentono sempre a volume pieno. Il tasto con la freccia,
+  sopra la barra dei comandi, riporta la mappa su di te e sul cerchio da 1 km.
+- **Mini** (impostazioni): apre la mini finestra (Picture in Picture) con chi è in chiamata.
 
 ## File
 
@@ -134,7 +148,6 @@ scrivi tutto in `ICE_SERVERS` come JSON:
 
 ## Limiti noti
 
-- Su iPhone il volume non scende con la distanza: Safari non permette alle pagine di cambiarlo.
 - Massimo 12 persone per stanza. Oltre le 5–6 persone nella stessa chiamata i collegamenti diretti
   pesano sulla batteria e sulla rete: per gruppi grandi conviene un server audio come LiveKit.
 - Le stanze vivono in memoria: se il server si riavvia, i telefoni si ricollegano da soli.

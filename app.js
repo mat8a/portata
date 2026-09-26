@@ -10,7 +10,7 @@ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform 
 const state = {
   id: null, room: '', name: '', ice: [], radius: 1000, exitMargin: 0.1,
   ws: null, wsOk: false, retry: 1000, leaving: false,
-  stream: null, micTrack: null, muted: false, music: false, musicTalk: false, musicTalkPending: false,
+  stream: null, micTrack: null, muted: false, music: false, musicTalk: false, micPending: false,
   ptt: false, talking: false, invisible: false,
   ctx: null, localAnalyser: null,
   watchId: null, lastPos: null, geoError: null, lastSent: null, lastSentAt: 0,
@@ -86,7 +86,6 @@ $('#joinForm').addEventListener('submit', async e => {
   setAudioSession('play-and-record');
   try { await acquireMic(); }
   catch (err) { btn.disabled = false; return joinError(micErrorText(err)); }
-  startKeepAlive();
   setupMediaKeys();
   try { state.ctx = new (window.AudioContext || window.webkitAudioContext)(); await state.ctx.resume(); } catch { state.ctx = null; }
   attachLocalAnalyser();
@@ -98,17 +97,20 @@ $('#joinForm').addEventListener('submit', async e => {
   $('#radius').value = state.radius; $('#radiusOut').textContent = fmtR(state.radius);
   $('#pttToggle').checked = state.ptt;
   $('#carKeysToggle').checked = state.carKeys;
-  applyMic();
+  startKeepAlive();
   $('#joinView').hidden = true; $('#callView').hidden = false;
 
   initMap();
   startGeo();
   startPip();
   connect();
-  render();
+  syncMic();
 });
 
 /* ---------------- microfono ---------------- */
+// Regola: il microfono viene preso SOLO mentre deve trasmettere. Quando è spento (muto,
+// premi per parlare a riposo, modalità musica) viene restituito al telefono, così
+// la musica di Spotify o Apple Music può suonare. Riaccenderlo la mette in pausa.
 function setAudioSession(type) {
   // Safari 17+: dice a iOS come trattare l'audio della pagina. "ambient" si mescola con la musica.
   try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {}
@@ -121,7 +123,6 @@ async function acquireMic() {
   state.micTrack.addEventListener('mute', onMicMute);
   state.micTrack.addEventListener('unmute', () => renderDiag());
   state.micTrack.addEventListener('ended', () => { if (away) away.micEnded = true; renderDiag(); });
-  applyMic();
   attachLocalAnalyser();
 }
 function attachLocalAnalyser() {
@@ -133,9 +134,59 @@ function attachLocalAnalyser() {
     src.connect(state.localAnalyser);
   } catch {}
 }
-function applyMic() {
-  if (state.micTrack) state.micTrack.enabled = state.ptt ? state.talking : !state.muted;
+function setSenderTrack(pc, track) {
+  if (!pc) return;
+  for (const t of pc.getTransceivers()) {
+    if (t.receiver && t.receiver.track && t.receiver.track.kind === 'audio' && !t.stopped) t.sender.replaceTrack(track).catch(() => {});
+  }
 }
+
+// deve trasmettere adesso?
+const micWanted = () => state.music ? state.musicTalk : state.ptt ? state.talking : !state.muted;
+const micOn = () => micWanted() && !!state.micTrack && !state.micPending;
+
+let lastFlags = '';
+async function syncMic() {
+  const want = micWanted();
+  if (want && !state.micTrack && !state.micPending) {
+    state.micPending = true; render();
+    setAudioSession('play-and-record');
+    try { await acquireMic(); }
+    catch (err) {
+      state.micPending = false;
+      setAudioSession('ambient');
+      if (state.music) state.musicTalk = false; else if (state.ptt) state.talking = false; else state.muted = true;
+      toast(micErrorText(err), 'bad'); render(); return;
+    }
+    state.micPending = false;
+    if (!micWanted()) { releaseMic(); sendFlags(); render(); return; } // lasciato prima che fosse pronto
+    for (const p of state.peers.values()) setSenderTrack(p.pc, state.micTrack);
+    startKeepAlive();
+    if (navigator.vibrate) navigator.vibrate(12);
+  } else if (!want && state.micTrack) {
+    releaseMic();
+  }
+  sendFlags();
+  render();
+}
+function releaseMic() {
+  for (const p of state.peers.values()) setSenderTrack(p.pc, null);
+  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+  state.stream = null; state.micTrack = null; state.localAnalyser = null;
+  stopKeepAlive();
+  setAudioSession('ambient');
+  if (state.ctx) state.ctx.resume().catch(() => {});
+}
+function sendFlags() {
+  // agli altri: 🎵 se ascolti musica, microfono barrato se non ti sentono
+  const music = state.music && !state.musicTalk;
+  const muted = !music && !micWanted();
+  const key = `${music}|${muted}`;
+  if (key === lastFlags) return;
+  lastFlags = key;
+  send({ t: 'settings', music, muted });
+}
+
 function onMicMute() {
   if (away) away.micMuted = true;
   renderDiag();
@@ -145,112 +196,64 @@ function onMicMute() {
 function checkMicTaken() {
   const t = state.micTrack;
   if (!t || !(t.muted || t.readyState === 'ended')) return;
-  if (state.music && state.musicTalk) musicTalkStop();   // la musica è ripartita mentre parlavi
-  else if (!state.music) enterMusic(true);
-}
-
-function setSenderTrack(pc, track) {
-  if (!pc) return;
-  for (const t of pc.getTransceivers()) {
-    if (t.receiver && t.receiver.track && t.receiver.track.kind === 'audio' && !t.stopped) t.sender.replaceTrack(track).catch(() => {});
-  }
+  if (state.music) { state.musicTalk = false; syncMic(); }   // la musica è ripartita mentre parlavi
+  else if (state.ptt) { state.talking = false; syncMic(); }
+  else enterMusic(true);
 }
 
 /* ---------------- modalità musica ---------------- */
+let musicHintShown = false;
 function enterMusic(auto = false) {
   if (state.music) return;
-  state.music = true; state.talking = false;
-  for (const p of state.peers.values()) setSenderTrack(p.pc, null);
-  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
-  state.stream = null; state.micTrack = null; state.localAnalyser = null;
-  stopKeepAlive();
-  setAudioSession('ambient');
-  if (state.ctx) state.ctx.resume().catch(() => {});
-  send({ t: 'settings', music: true });
+  state.music = true; state.musicTalk = false; state.talking = false;
+  syncMic();
   toast(auto
     ? 'È partita la musica: il tuo microfono è in pausa. Tocca il microfono quando vuoi parlare.'
     : 'Modalità musica: fai partire la tua musica. Senti ancora gli altri; per parlare tocca il microfono.', 'music');
-  render();
 }
-
-// In modalità musica il microfono si prende solo mentre parli, poi si restituisce l'audio al telefono.
-let talkToken = 0, musicHintShown = false;
-async function musicTalkStart() {
-  if (!state.music || state.musicTalk || state.musicTalkPending) return;
-  const token = ++talkToken;
-  state.musicTalkPending = true; renderDock();
-  setAudioSession('play-and-record');
-  try { await acquireMic(); }
-  catch (err) { state.musicTalkPending = false; setAudioSession('ambient'); toast(micErrorText(err), 'bad'); renderDock(); return; }
-  state.musicTalkPending = false;
-  if (token !== talkToken || !state.music) { releaseMusicMic(); renderDock(); return; } // lasciato prima che fosse pronto
-  state.musicTalk = true; state.talking = true;
-  state.micTrack.enabled = true;
-  for (const p of state.peers.values()) setSenderTrack(p.pc, state.micTrack);
-  send({ t: 'settings', music: false });
-  if (navigator.vibrate) navigator.vibrate(15);
-  render();
-}
-function musicTalkStop() {
-  talkToken++;
-  if (!state.musicTalk && !state.musicTalkPending) return;
-  state.musicTalkPending = false;
-  if (!state.musicTalk) { renderDock(); return; }
-  state.musicTalk = false; state.talking = false;
-  releaseMusicMic();
-  send({ t: 'settings', music: true });
-  if (isIOS && !musicHintShown) { musicHintShown = true; toast('Se la musica non riparte da sola, premi play dal Centro di Controllo.', 'music'); }
-  render();
-}
-function releaseMusicMic() {
-  for (const p of state.peers.values()) setSenderTrack(p.pc, null);
-  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
-  state.stream = null; state.micTrack = null; state.localAnalyser = null;
-  setAudioSession('ambient');
-}
-
-async function exitMusic() {
+function exitMusic() {
   if (!state.music) return;
-  if (state.musicTalk) {
-    // stai già parlando: resta così e chiudi solo la modalità musica
-    state.music = false; state.musicTalk = false; state.talking = false; state.muted = false;
-    applyMic();
-    send({ t: 'settings', music: false, muted: false });
-    toast('Modalità musica chiusa: microfono sempre attivo.');
-    startKeepAlive();
-    render();
-    return;
-  }
-  setAudioSession('play-and-record');
-  try { await acquireMic(); }
-  catch (err) { setAudioSession('ambient'); toast(micErrorText(err), 'bad'); return; }
-  state.music = false; state.muted = false;
-  applyMic();
-  for (const p of state.peers.values()) setSenderTrack(p.pc, state.micTrack);
-  send({ t: 'settings', music: false, muted: false });
-  toast(isIOS ? 'Microfono acceso. iPhone mette in pausa la musica mentre parli.' : 'Microfono acceso.');
-  startKeepAlive();
-  render();
+  state.music = false; state.musicTalk = false; state.muted = false; state.talking = false;
+  syncMic();
+  toast(state.ptt ? 'Modalità musica chiusa.' : 'Microfono acceso.');
 }
+function setMusicTalk(on) {
+  if (!state.music || state.musicTalk === on) return;
+  state.musicTalk = on;
+  syncMic();
+  if (!on && isIOS && !musicHintShown) { musicHintShown = true; toast('Se la musica non riparte da sola, premi play dal Centro di Controllo.', 'music'); }
+}
+$('#musicBtn').addEventListener('click', () => { if (state.music) exitMusic(); else enterMusic(false); });
 
 /* ---------------- tasto microfono ---------------- */
 const micBtn = $('#micBtn');
 micBtn.addEventListener('click', () => {
   if (state.ptt) return; // gestito da pressione e rilascio
-  if (state.music) return state.musicTalk || state.musicTalkPending ? musicTalkStop() : musicTalkStart();
+  if (state.music) return setMusicTalk(!state.musicTalk);
   toggleMute();
 });
 function toggleMute() {
   state.muted = !state.muted;
-  applyMic();
-  send({ t: 'settings', muted: state.muted });
-  render();
+  syncMic();
 }
+function talk(on) {
+  if (!state.ptt) return;
+  if (state.music) return setMusicTalk(on);
+  if (state.talking === on) return;
+  state.talking = on;
+  syncMic();
+}
+micBtn.addEventListener('pointerdown', e => { if (state.ptt) { e.preventDefault(); micBtn.setPointerCapture?.(e.pointerId); talk(true); } });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => micBtn.addEventListener(ev, () => talk(false)));
+micBtn.addEventListener('contextmenu', e => e.preventDefault());
+micBtn.addEventListener('keydown', e => { if (e.key === ' ' && state.ptt) { e.preventDefault(); talk(true); } });
+micBtn.addEventListener('keyup', e => { if (e.key === ' ' && state.ptt) talk(false); });
 
 /* ---------------- tasti del volante e delle cuffie ---------------- */
 // Il tasto play/pausa (volante via Bluetooth, cuffie, AirPods) accende e spegne il microfono.
-// Arriva a Portata solo se è lei l'audio "in riproduzione": per questo suona un audio muto
-// in sottofondo, che si ferma in modalità musica (lì i tasti tornano a Spotify o Apple Music).
+// Arriva a Portata solo se è lei l'audio "in riproduzione": per questo, mentre il microfono è
+// acceso, suona un audio muto in sottofondo. A microfono spento si ferma, così i tasti tornano
+// alla musica.
 state.carKeys = load('carKeys') !== '0';
 let keepAlive = null;
 function silentWavUrl() {
@@ -265,20 +268,21 @@ function silentWavUrl() {
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
 function startKeepAlive() {
-  if (!state.carKeys || state.music) return;
+  if (!state.carKeys || !state.micTrack) return;
   if (!keepAlive) { keepAlive = new Audio(silentWavUrl()); keepAlive.loop = true; keepAlive.setAttribute('playsinline', ''); }
   keepAlive.play().catch(() => {});
   try { navigator.mediaSession.playbackState = 'playing'; } catch {}
 }
-function stopKeepAlive() { if (keepAlive) keepAlive.pause(); }
+function stopKeepAlive() {
+  if (keepAlive) keepAlive.pause();
+  try { navigator.mediaSession.playbackState = 'paused'; } catch {}
+}
 function mediaKey() {
   if (!state.carKeys) return;
-  if (state.music) { state.musicTalk || state.musicTalkPending ? musicTalkStop() : musicTalkStart(); return; }
-  if (state.ptt) talk(!state.talking);
+  if (state.music) setMusicTalk(!state.musicTalk);
+  else if (state.ptt) talk(!state.talking);
   else toggleMute();
-  const on = state.ptt ? state.talking : !state.muted;
-  toast(on ? 'Microfono acceso dal tasto' : 'Microfono spento dal tasto');
-  try { navigator.mediaSession.playbackState = 'playing'; } catch {}
+  toast(micWanted() ? 'Microfono acceso dal tasto' : 'Microfono spento dal tasto');
 }
 function setupMediaKeys() {
   if (!('mediaSession' in navigator)) return;
@@ -286,22 +290,6 @@ function setupMediaKeys() {
     try { navigator.mediaSession.setActionHandler(a, mediaKey); } catch {}
   }
 }
-function talk(on) {
-  if (!state.ptt) return;
-  if (state.music) return on ? musicTalkStart() : musicTalkStop();
-  if (state.talking === on) return;
-  state.talking = on;
-  applyMic();
-  if (on && navigator.vibrate) navigator.vibrate(12);
-  renderDock();
-}
-micBtn.addEventListener('pointerdown', e => { if (state.ptt) { e.preventDefault(); micBtn.setPointerCapture?.(e.pointerId); talk(true); } });
-['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => micBtn.addEventListener(ev, () => talk(false)));
-micBtn.addEventListener('contextmenu', e => e.preventDefault());
-micBtn.addEventListener('keydown', e => { if (e.key === ' ' && state.ptt) { e.preventDefault(); talk(true); } });
-micBtn.addEventListener('keyup', e => { if (e.key === ' ' && state.ptt) talk(false); });
-
-$('#musicBtn').addEventListener('click', () => { if (state.music) exitMusic(); else enterMusic(false); });
 
 /* ---------------- posizione ---------------- */
 function startGeo() {
@@ -339,7 +327,7 @@ function connect() {
   state.ws = ws;
   ws.onopen = () => {
     state.wsOk = true; state.retry = 1000;
-    send({ t: 'join', room: state.room, name: state.name, radius: state.radius, paused: state.invisible, music: state.music, muted: state.muted && !state.ptt });
+    send({ t: 'join', room: state.room, name: state.name, radius: state.radius, paused: state.invisible, music: state.music && !state.musicTalk, muted: !(state.music && !state.musicTalk) && !micWanted() });
     renderDiag();
   };
   ws.onmessage = e => { if (away) away.msgs++; let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
@@ -492,11 +480,22 @@ function closePeer(id) {
   p.analyser = null; p.linked = false; p.conn = 'closed'; p.level = 0;
 }
 
-// volume che scende con la distanza (su iPhone il browser ignora questa impostazione)
+// Tutti si sentono a volume pieno. Puoi silenziare una persona solo per te:
+// lei non lo sa e continua a sentirti. La scelta si ricorda per nome.
+let silenced = new Set();
+try { silenced = new Set(JSON.parse(load('silenced') || '[]')); } catch {}
+const isSilenced = p => silenced.has(p.name);
 function applyVolume(p) {
   if (!p.audio) return;
-  const d = p.distance ?? 0, R = state.radius;
-  p.audio.volume = d <= 50 ? 1 : clamp(1 - (d - 50) / (R * (1 + state.exitMargin) - 50), 0.15, 1);
+  p.audio.volume = 1;
+  p.audio.muted = isSilenced(p);
+}
+function toggleSilence(p) {
+  if (isSilenced(p)) silenced.delete(p.name); else silenced.add(p.name);
+  store('silenced', JSON.stringify([...silenced]));
+  applyVolume(p);
+  toast(isSilenced(p) ? `Hai silenziato ${p.name} solo per te` : `Senti di nuovo ${p.name}`);
+  renderPeople();
 }
 
 function rms(an) {
@@ -527,7 +526,7 @@ function statusText() {
       : state.music ? (state.ptt ? 'Modalità musica: tieni premuto il microfono per parlare.' : 'Modalità musica: tu senti loro. Tocca il microfono per parlare.')
       : state.ptt ? 'Tieni premuto il microfono per parlare.'
       : state.muted ? 'Il tuo microfono è spento.'
-      : isIOS ? 'Parla pure: vi sentite finché siete vicini.' : 'Il volume scende con la distanza.';
+      : 'Vi sentite finché siete vicini.';
     return [`In chiamata con ${listNames(live.map(p => p.name))}`, sub];
   }
   return [`Nessuno entro ${fmtR(state.radius)}`,
@@ -539,6 +538,8 @@ function render() {
   const [title, sub] = statusText();
   $('#statusTitle').textContent = title;
   $('#statusSub').textContent = sub;
+  // in basso compaiono solo gli avvisi: chi è in chiamata si vede in alto a sinistra
+  $('#statusPill').hidden = !(!state.wsOk || state.invisible || !state.lastPos);
   const live = livePeers().length;
   $('#liveDot').classList.toggle('on', live > 0);
   const n = state.peers.size + 1;
@@ -569,36 +570,47 @@ function renderPeople() {
   const order = { live: 0, connecting: 1, out: 2, nopos: 3, paused: 4 };
   const list = [...state.peers.values()].sort((a, b) =>
     order[peerStatus(a)[0]] - order[peerStatus(b)[0]] || (a.distance ?? 1e9) - (b.distance ?? 1e9));
-  if (list.length === 0) {
-    $('#people').innerHTML = state.wsOk
-      ? `<li class="empty">Nella stanza ci sei solo tu. <button type="button" data-act="share">Invita qualcuno</button></li>` : '';
-    return;
-  }
   $('#people').innerHTML = list.map(p => {
     const [cls, label] = peerStatus(p);
-    let meta = label;
-    if (state.dest && p.lat != null) meta += ` · ${fmtD(distM(p, state.dest))} dalla meta`;
     const tag = p.music ? '<span class="tag music"><svg class="ic"><use href="#i-music"/></svg></span>'
-      : p.muted ? '<span class="tag muted"><svg class="ic"><use href="#i-mic-off"/></svg></span>' : '';
-    return `<li class="person p-${cls}" data-id="${esc(p.id)}">
-      <span class="av">${esc((p.name[0] || '?').toUpperCase())}${tag}</span>
-      <div><div class="pname">${esc(p.name)}</div><div class="pmeta"><span class="pstate">${esc(meta)}</span></div></div>
-      <div class="pright"><span class="pdist">${fmtD(p.distance)}</span><span class="meter" aria-hidden="true"><i></i></span></div></li>`;
+      : p.muted && cls === 'live' ? '<span class="tag muted"><svg class="ic"><use href="#i-mic-off"/></svg></span>' : '';
+    const dist = p.distance != null ? `<span class="mono">${fmtD(p.distance)}</span> · ` : '';
+    const off = isSilenced(p);
+    const spk = p.linked
+      ? `<button type="button" class="spk${off ? ' off' : ''}" data-spk="${esc(p.id)}" aria-pressed="${off}" aria-label="${off ? 'Torna a sentire' : 'Silenzia per me'} ${esc(p.name)}"><svg class="ic"><use href="#${off ? 'i-volume-off' : 'i-volume'}"/></svg></button>` : '';
+    return `<li class="person glass p-${cls}" data-id="${esc(p.id)}">
+      <button type="button" class="pmain" data-go="${esc(p.id)}" aria-label="Mostra ${esc(p.name)} sulla mappa, ${esc(label)}">
+        <span class="av">${esc((p.name[0] || '?').toUpperCase())}${tag}</span>
+        <span class="pinfo"><span class="pname">${esc(p.name)}</span><span class="pmeta">${dist}<span class="pstate${off && p.linked ? ' off' : ''}">${esc(off && p.linked ? 'Silenziato da te' : label)}</span></span></span>
+      </button>${spk}</li>`;
   }).join('');
 }
-$('#people').addEventListener('click', e => { if (e.target.closest('[data-act="share"]')) share(); });
+// tocca una persona: la mappa va su di lei; tocca l'altoparlante: la silenzi solo per te
+$('#people').addEventListener('click', e => {
+  const s = e.target.closest('[data-spk]');
+  if (s) { const p = state.peers.get(s.dataset.spk); if (p) toggleSilence(p); return; }
+  const b = e.target.closest('[data-go]'); if (!b) return;
+  const p = state.peers.get(b.dataset.go);
+  if (!p || p.lat == null || !map.m) return toast(`${p ? p.name : 'Questa persona'} non ha una posizione da mostrare`);
+  map.follow = false;
+  map.m.flyTo([p.lat, p.lon], Math.max(map.m.getZoom(), 16), { duration: 0.8 });
+});
+// tocca lo stato: se sei solo inviti, altrimenti torni a vedere tutto il cerchio
+$('#statusPill').addEventListener('click', () => {
+  if (state.peers.size === 0 && state.wsOk) return share();
+  map.follow = true; fitRadius();
+});
 
 function renderDock() {
-  const talking = state.music ? state.musicTalk : state.ptt && state.talking;
+  const on = micOn();
   micBtn.classList.toggle('music', state.music);
   micBtn.classList.toggle('muted', !state.music && !state.ptt && state.muted);
   micBtn.classList.toggle('ptt', !state.music && state.ptt);
-  micBtn.classList.toggle('talking', talking);
-  micBtn.classList.toggle('pending', !!state.musicTalkPending);
-  const off = state.music ? !state.musicTalk : (!state.ptt && state.muted) || (state.ptt && !state.talking);
-  micBtn.querySelector('use').setAttribute('href', off ? '#i-mic-off' : '#i-mic');
-  $('#micLbl').textContent = state.musicTalkPending ? 'Un attimo…'
-    : talking ? 'Parli…'
+  micBtn.classList.toggle('talking', on && (state.music || state.ptt));
+  micBtn.classList.toggle('pending', !!state.micPending);
+  micBtn.querySelector('use').setAttribute('href', micWanted() ? '#i-mic' : '#i-mic-off');
+  $('#micLbl').textContent = state.micPending ? 'Un attimo…'
+    : on && (state.music || state.ptt) ? 'Parli…'
     : state.ptt ? 'Tieni premuto'
     : state.music ? 'Parla'
     : state.muted ? 'Muto' : 'Microfono';
@@ -616,11 +628,8 @@ function tickLevels() {
   for (const p of state.peers.values()) {
     p.level = p.analyser ? rms(p.analyser) : 0;
     const speaking = p.level > 0.03;
-    const li = document.querySelector(`.person[data-id="${CSS.escape(p.id)}"]`);
-    if (li) {
-      li.querySelector('.meter i').style.width = `${Math.round(clamp(p.level * 600, 0, 100))}%`;
-      li.querySelector('.av').classList.toggle('speaking', speaking);
-    }
+    const av = document.querySelector(`.person[data-id="${CSS.escape(p.id)}"] .av`);
+    if (av) av.classList.toggle('speaking', speaking);
     const pin = map.markers.get(p.id)?.getElement()?.querySelector('.pin');
     if (pin) pin.classList.toggle('speaking', speaking);
   }
@@ -632,23 +641,32 @@ function renderDiag() {
   else set('#dPos', state.geoError ? 'non disponibile' : 'in attesa', state.geoError ? 'ko' : 'meh');
   set('#dWs', state.wsOk ? 'collegato' : 'non collegato', state.wsOk ? 'ok' : 'ko');
   const t = state.micTrack;
-  if (state.music) set('#dMic', state.musicTalk ? 'acceso (musica in pausa)' : 'in pausa (musica)', state.musicTalk ? 'ok' : 'meh');
-  else if (!t) set('#dMic', '—');
-  else if (t.readyState === 'ended') set('#dMic', 'terminato', 'ko');
-  else if (t.muted) set('#dMic', 'silenziato dal sistema', 'ko');
-  else if (state.ptt) set('#dMic', state.talking ? 'acceso (premuto)' : 'pronto, premi per parlare', 'ok');
-  else if (state.muted) set('#dMic', 'spento da te', 'meh');
-  else set('#dMic', 'attivo', 'ok');
+  if (state.micPending) set('#dMic', 'in accensione…', 'meh');
+  else if (t && t.readyState === 'ended') set('#dMic', 'terminato', 'ko');
+  else if (t && t.muted) set('#dMic', 'silenziato dal sistema', 'ko');
+  else if (t) set('#dMic', 'acceso', 'ok');
+  else set('#dMic', state.music ? 'libero (musica)' : state.ptt ? 'libero, premi per parlare' : 'spento, libero per la musica', 'meh');
   set('#dPip', state.pipOpen ? 'aperta' : 'chiusa', state.pipOpen ? 'ok' : '');
   set('#dWake', state.wake ? 'sì' : 'no', state.wake ? 'ok' : '');
 }
 
 /* ---------------- meta condivisa ---------------- */
-function directionsUrl(d) {
-  return isIOS
-    ? `https://maps.apple.com/?daddr=${d.lat},${d.lon}&dirflg=w`
-    : `https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lon}&travelmode=walking`;
+// App per le indicazioni: scelta ogni volta oppure ricordata.
+const NAV_APPS = [
+  { id: 'apple', name: 'Apple Mappe', color: '#1F8BFF', letter: 'A', modes: ['walk', 'car', 'transit'] },
+  { id: 'google', name: 'Google Maps', color: '#34A853', letter: 'G', modes: ['walk', 'car', 'transit'] },
+  { id: 'waze', name: 'Waze', color: '#33CCFF', letter: 'W', modes: ['car'] },
+];
+state.navApp = load('navApp') || '';
+state.navMode = load('navMode') || 'walk';
+function navUrl(app, mode, d) {
+  const ll = `${d.lat},${d.lon}`;
+  if (app === 'apple') return `https://maps.apple.com/?daddr=${ll}&dirflg=${{ walk: 'w', car: 'd', transit: 'r' }[mode]}`;
+  if (app === 'google') return `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=${{ walk: 'walking', car: 'driving', transit: 'transit' }[mode]}`;
+  if (app === 'waze') return `https://waze.com/ul?ll=${ll}&navigate=yes`;
+  return '#';
 }
+
 function renderDest() {
   const d = state.dest, card = $('#destCard');
   card.hidden = !d;
@@ -658,10 +676,63 @@ function renderDest() {
   if (state.lastPos) parts.push(`a ${fmtD(distM(state.lastPos, d))} da te`);
   parts.push(`da ${d.byName}`);
   $('#destMeta').textContent = parts.join(' · ');
-  $('#destOpen').href = directionsUrl(d);
+  const open = $('#destOpen');
+  const mode = NAV_APPS.find(a => a.id === state.navApp)?.modes.includes(state.navMode) ? state.navMode : 'car';
+  open.href = state.navApp ? navUrl(state.navApp, mode, d) : '#';
 }
+$('#destOpen').addEventListener('click', e => {
+  if (!state.dest) return e.preventDefault();
+  if (!state.navApp) { e.preventDefault(); openNavSheet(); }
+});
+
+function openNavSheet() {
+  const r = document.querySelector(`input[name=navMode][value="${state.navMode}"]`);
+  if (r) r.checked = true;
+  renderNavApps();
+  openModal('#navSheet');
+}
+function renderNavApps() {
+  const d = state.dest; if (!d) return;
+  const mode = document.querySelector('input[name=navMode]:checked')?.value || 'walk';
+  const apps = isIOS ? NAV_APPS : [NAV_APPS[1], NAV_APPS[2], NAV_APPS[0]]; // su iPhone Apple Mappe per prima
+  $('#navApps').innerHTML = apps.map(a => {
+    const ok = a.modes.includes(mode);
+    const note = ok ? { walk: 'A piedi', car: 'In auto', transit: 'Con i mezzi' }[mode] : 'Solo in auto';
+    return `<a class="appbtn" data-app="${a.id}" href="${ok ? navUrl(a.id, mode, d) : navUrl(a.id, 'car', d)}" target="_blank" rel="noopener">
+      <span class="logo" style="background:${a.color}">${a.letter}</span><span><b>${a.name}</b><small>${note}</small></span></a>`;
+  }).join('');
+}
+document.querySelectorAll('input[name=navMode]').forEach(r => r.addEventListener('change', renderNavApps));
+$('#navApps').addEventListener('click', e => {
+  const a = e.target.closest('.appbtn'); if (!a) return;
+  const mode = document.querySelector('input[name=navMode]:checked')?.value || 'walk';
+  if ($('#navRemember').checked) {
+    state.navApp = a.dataset.app; state.navMode = mode;
+    store('navApp', state.navApp); store('navMode', mode);
+    $('#navPref').value = state.navApp;
+    renderDest();
+  }
+  setTimeout(closeModals, 300); // il link si apre nell'app scelta; la chiamata resta qui
+});
+$('#navClose').addEventListener('click', closeModals);
+$('#navCopy').addEventListener('click', async () => {
+  const d = state.dest; if (!d) return;
+  const text = `${d.label} — ${d.lat.toFixed(6)}, ${d.lon.toFixed(6)}\nhttps://www.google.com/maps/search/?api=1&query=${d.lat},${d.lon}`;
+  try { await navigator.clipboard.writeText(text); toast('Posizione della meta copiata'); }
+  catch { toast(`${d.lat.toFixed(6)}, ${d.lon.toFixed(6)}`); }
+});
+$('#navPref').value = state.navApp;
+$('#navPref').addEventListener('change', e => {
+  state.navApp = e.target.value; store('navApp', state.navApp);
+  renderDest();
+  toast(state.navApp ? `Indicazioni con ${NAV_APPS.find(a => a.id === state.navApp).name}` : 'Ti chiederò ogni volta quale app usare');
+});
+
 $('#destClear').addEventListener('click', () => { send({ t: 'dest', clear: true }); state.dest = null; render(); toast('Meta tolta per tutti'); });
-$('#destBtn').addEventListener('click', () => openModal('#destChoose'));
+$('#destBtn').addEventListener('click', () => {
+  $('#destSearch').value = ''; $('#destResults').innerHTML = ''; $('#destChoices').hidden = false;
+  openModal('#destChoose');
+});
 $('#chooseCancel').addEventListener('click', closeModals);
 $('#chooseMap').addEventListener('click', () => {
   closeModals();
@@ -679,17 +750,59 @@ function stopPicking() {
   $('#pickBar').hidden = true;
   if (map.m) map.m.getContainer().style.cursor = '';
 }
-function setPending(pt) {
+function setPending(pt, label = '', fly = false) {
   stopPicking();
   state.pending = pt;
   drawPending();
+  if (fly && map.m) { map.follow = false; map.m.flyTo([pt.lat, pt.lon], Math.max(map.m.getZoom(), 16), { duration: 0.8 }); }
   $('#destWhere').textContent = state.lastPos
     ? `A ${fmtD(distM(state.lastPos, pt))} da te. Tutti nella stanza la vedranno sulla mappa.`
     : 'Tutti nella stanza la vedranno sulla mappa.';
-  $('#destName').value = '';
+  $('#destName').value = label;
   openModal('#destSheet');
-  setTimeout(() => $('#destName').focus(), 250);
+  if (!label) setTimeout(() => $('#destName').focus(), 250);
 }
+
+// ricerca per indirizzo (il server interroga OpenStreetMap)
+let searchTimer = null, searchSeq = 0, lastResults = [];
+$('#destSearch').addEventListener('input', e => {
+  const q = e.target.value.trim();
+  clearTimeout(searchTimer);
+  $('#destChoices').hidden = q.length > 0;
+  if (q.length < 3) { $('#destResults').innerHTML = ''; return; }
+  searchTimer = setTimeout(() => runSearch(q), 350);
+});
+$('#destSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); const q = e.target.value.trim(); if (q.length >= 2) runSearch(q); }
+});
+async function runSearch(q) {
+  const seq = ++searchSeq;
+  const list = $('#destResults');
+  if (!lastResults.length) list.innerHTML = '<li class="note">Cerco…</li>';
+  const params = new URLSearchParams({ q });
+  if (state.lastPos) { params.set('lat', state.lastPos.lat.toFixed(4)); params.set('lon', state.lastPos.lon.toFixed(4)); }
+  let data;
+  try {
+    const r = await fetch('/geocode?' + params);
+    data = await r.json();
+  } catch { data = { results: [], error: 'Ricerca non disponibile: controlla la connessione.' }; }
+  if (seq !== searchSeq) return; // è arrivata una ricerca più recente
+  lastResults = data.results || [];
+  if (!lastResults.length) {
+    list.innerHTML = `<li class="note">${esc(data.error || 'Nessun risultato. Prova ad aggiungere la città.')}</li>`;
+    return;
+  }
+  list.innerHTML = lastResults.map((r, i) => {
+    const dist = state.lastPos ? fmtD(distM(state.lastPos, r)) : '';
+    return `<li><button type="button" data-i="${i}"><b>${esc(r.name)}</b><small>${esc(r.detail || '')}</small><span class="rdist">${dist}</span></button></li>`;
+  }).join('');
+}
+$('#destResults').addEventListener('click', e => {
+  const b = e.target.closest('button[data-i]'); if (!b) return;
+  const r = lastResults[+b.dataset.i]; if (!r) return;
+  setPending({ lat: r.lat, lon: r.lon }, r.name.slice(0, 40), true);
+});
+
 $('#destCancel').addEventListener('click', () => { clearPending(); closeModals(); });
 $('#destShare').addEventListener('click', shareDest);
 $('#destName').addEventListener('keydown', e => { if (e.key === 'Enter') shareDest(); });
@@ -713,11 +826,10 @@ function closeModals() {
 $('#scrim').addEventListener('click', () => { clearPending(); closeModals(); });
 $('#moreBtn').addEventListener('click', () => { renderDiag(); openModal('#moreSheet'); });
 $('#moreClose').addEventListener('click', closeModals);
-$('#sheetHandle').addEventListener('click', () => $('#sheet').classList.toggle('expanded'));
 new ResizeObserver(([e]) => {
   const h = Math.round(e.target.getBoundingClientRect().height);
-  document.documentElement.style.setProperty('--sheet-h', (innerWidth >= 700 ? 0 : h) + 'px');
-}).observe($('#sheet'));
+  document.documentElement.style.setProperty('--sheet-h', h + 'px');
+}).observe($('#bottom'));
 
 /* ---------------- impostazioni ---------------- */
 $('#radius').addEventListener('input', e => { state.radius = +e.target.value; $('#radiusOut').textContent = fmtR(state.radius); });
@@ -730,8 +842,8 @@ $('#radius').addEventListener('change', () => {
 $('#pttToggle').addEventListener('change', e => {
   state.ptt = e.target.checked; state.talking = false;
   store('ptt', state.ptt ? '1' : '0');
-  if (state.ptt && state.muted) { state.muted = false; send({ t: 'settings', muted: false }); }
-  applyMic(); render();
+  if (state.ptt) state.muted = false;
+  syncMic();
   toast(state.ptt ? 'Premi per parlare attivo: tieni premuto il microfono quando vuoi parlare.' : 'Microfono sempre aperto.');
 });
 $('#carKeysToggle').addEventListener('change', e => {
@@ -786,6 +898,42 @@ $('#shareBtn').addEventListener('click', share);
 $('#roomPill').addEventListener('click', share);
 
 /* ---------------- mappa ---------------- */
+// Stili: Standard (CARTO Voyager, chiara e pulita come Google Maps), Scura (CARTO Dark Matter),
+// Satellite (Esri World Imagery con i nomi delle strade sopra).
+const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+const CARTO = '&copy; <a href="https://carto.com/attributions">CARTO</a>';
+const carto = path => `https://{s}.basemaps.cartocdn.com/${path}/{z}/{x}/{y}{r}.png`;
+state.mapStyle = ['std', 'dark', 'sat'].includes(load('mapStyle')) ? load('mapStyle') : 'std';
+let baseLayers = [];
+function setMapStyle(style) {
+  if (!map.m) return;
+  state.mapStyle = style; store('mapStyle', style);
+  baseLayers.forEach(l => l.remove()); baseLayers = [];
+  const opts = { maxZoom: 20, subdomains: 'abcd', detectRetina: false };
+  if (style === 'sat') {
+    baseLayers.push(L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 19, maxNativeZoom: 19, attribution: 'Immagini &copy; Esri' }));
+    baseLayers.push(L.tileLayer(carto('rastertiles/voyager_only_labels'), { ...opts, attribution: `${OSM} ${CARTO}` }));
+  } else if (style === 'dark') {
+    baseLayers.push(L.tileLayer(carto('dark_all'), { ...opts, attribution: `${OSM} ${CARTO}` }));
+  } else {
+    baseLayers.push(L.tileLayer(carto('rastertiles/voyager'), { ...opts, className: 'tiles-std', attribution: `${OSM} ${CARTO}` }));
+  }
+  baseLayers.forEach(l => l.addTo(map.m).bringToBack());
+  document.querySelectorAll('#layersMenu button').forEach(b => {
+    b.classList.toggle('on', b.dataset.style === style);
+    b.setAttribute('aria-checked', String(b.dataset.style === style));
+  });
+}
+$('#layersBtn').addEventListener('click', e => {
+  const menu = $('#layersMenu'); menu.hidden = !menu.hidden;
+  e.currentTarget.setAttribute('aria-expanded', String(!menu.hidden));
+});
+$('#layersMenu').addEventListener('click', e => {
+  const b = e.target.closest('button[data-style]'); if (!b) return;
+  setMapStyle(b.dataset.style);
+  $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false');
+});
 const map = { m: null, me: null, radius: null, margin: null, destMk: null, pendingMk: null, markers: new Map(), lines: new Map(), follow: true, fitted: false, lastHere: null };
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const sheetH = () => parseInt(cssVar('--sheet-h')) || 0;
@@ -793,12 +941,10 @@ const sheetH = () => parseInt(cssVar('--sheet-h')) || 0;
 function initMap() {
   if (!window.L) { toast('Mappa non disponibile: controlla la connessione e ricarica la pagina.', 'bad'); return; }
   map.m = L.map('map', { zoomControl: false, attributionControl: true }).setView([41.9, 12.5], 6);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map.m);
   map.m.attributionControl.setPrefix(false);
+  setMapStyle(state.mapStyle);
   map.m.on('dragstart', () => { map.follow = false; });
+  map.m.on('click', () => { $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false'); });
   map.m.on('click', e => { if (state.picking) setPending({ lat: e.latlng.lat, lon: e.latlng.lng }); });
   $('#recenterBtn').addEventListener('click', () => { map.follow = true; fitRadius(); });
   setTimeout(() => map.m.invalidateSize(), 100);
@@ -806,7 +952,7 @@ function initMap() {
 
 function fitRadius() {
   if (!map.m || !map.margin) return;
-  map.m.fitBounds(map.margin.getBounds(), { paddingTopLeft: [16, 70], paddingBottomRight: [16, sheetH() + 16] });
+  map.m.fitBounds(map.margin.getBounds(), { paddingTopLeft: [16, 70], paddingBottomRight: [16, sheetH() + 10] });
 }
 function centerOn(latlng) {
   // tiene il tuo punto al centro dell'area visibile, sopra il pannello
@@ -921,7 +1067,7 @@ async function openPip() {
     toast('La mini finestra non è disponibile su questo browser.', 'bad');
   }
 }
-$('#pipBtn').addEventListener('click', openPip);
+$('#pipBtn').addEventListener('click', () => { closeModals(); openPip(); });
 
 function drawPip() {
   const c = pctx, W = 640, H = 360;
