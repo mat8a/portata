@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#2A5BD7">
+  <meta name="theme-color" content="#0A0F14" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F2F4F7" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Portata">
   <title>Portata</title>
   <link rel="manifest" href="/manifest.webmanifest">
@@ -14,68 +16,168 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main class="wrap">
+  <!-- icone -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></symbol>
+      <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M2 2l20 20"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M12 19v3"/></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-pip" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></symbol>
+      <symbol id="i-nav" viewBox="0 0 24 24"><path d="M3 11l19-9-9 19-2-8-8-2Z"/></symbol>
+      <symbol id="i-leave" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+    </defs>
+  </svg>
 
-    <!-- ingresso -->
-    <section id="joinView" class="view">
+  <!-- ingresso -->
+  <main id="joinView" class="join">
+    <div class="rings" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
+    <div class="join-inner">
       <header class="brand">
         <h1>Portata</h1>
-        <p>Resti in chiamata con chi è entro 1 km da te. Chi si allontana esce da solo, chi si avvicina entra.</p>
+        <p>La chiamata che si accende quando i tuoi amici sono a meno di 1 km.</p>
       </header>
-      <form id="joinForm" class="card form" autocomplete="on">
-        <label for="name">Il tuo nome</label>
-        <input id="name" name="name" maxlength="24" required placeholder="Mattia" autocomplete="given-name">
-        <label for="room">Codice stanza</label>
-        <input id="room" name="room" maxlength="20" required minlength="3" placeholder="AMICI42" autocapitalize="characters" spellcheck="false">
-        <p class="hint">Chi usa lo stesso codice può sentirti quando è vicino. Condividilo solo con chi vuoi.</p>
-        <button class="primary" type="submit" id="joinBtn">Entra</button>
-        <p class="hint">Ti chiederà il permesso per microfono e posizione. Chi è nella stanza ti vede sulla mappa; con Pausa sparisci.</p>
+      <ul class="features">
+        <li><svg class="ic"><use href="#i-radar"/></svg>Entri e esci dalla chiamata da solo, in base alla distanza</li>
+        <li><svg class="ic"><use href="#i-users"/></svg>Vedi gli amici della stanza sulla mappa</li>
+        <li><svg class="ic"><use href="#i-pin"/></svg>Condividi il punto d'incontro con un tocco</li>
+      </ul>
+      <form id="joinForm" class="joincard" autocomplete="on">
+        <div class="field">
+          <label for="name">Il tuo nome</label>
+          <input id="name" name="name" maxlength="24" required placeholder="Mattia" autocomplete="given-name">
+        </div>
+        <div class="field">
+          <label for="room">Codice stanza</label>
+          <input id="room" name="room" maxlength="20" required minlength="3" placeholder="AMICI42" autocapitalize="characters" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="cta" type="submit" id="joinBtn">Entra</button>
         <p class="error" id="joinError" role="alert" hidden></p>
+        <p class="fine">Servono microfono e posizione. Chi ha il codice ti vede sulla mappa; puoi diventare invisibile quando vuoi.</p>
       </form>
+    </div>
+  </main>
+
+  <!-- chiamata -->
+  <main id="callView" class="call" hidden>
+    <div id="map" aria-label="Mappa"></div>
+
+    <div class="topbar">
+      <button class="pill" id="roomPill" type="button" aria-label="Invita nella stanza">
+        <span class="live-dot" id="liveDot"></span>
+        <span class="mono" id="roomLabel">—</span>
+        <span class="sep"></span>
+        <span id="onlineCount">solo tu</span>
+      </button>
+      <div class="topbtns">
+        <button class="roundbtn" id="shareBtn" type="button" aria-label="Invita"><svg class="ic"><use href="#i-share"/></svg></button>
+        <button class="roundbtn" id="moreBtn" type="button" aria-label="Impostazioni"><svg class="ic"><use href="#i-sliders"/></svg></button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <div class="pickbar" id="pickBar" hidden>
+      <span>Tocca la mappa dove vi incontrate</span>
+      <button type="button" id="pickCancel">Annulla</button>
+    </div>
+
+    <button class="roundbtn locate" id="recenterBtn" type="button" aria-label="Centra su di me"><svg class="ic"><use href="#i-locate"/></svg></button>
+
+    <section class="sheet" id="sheet">
+      <button class="handle" id="sheetHandle" type="button" aria-label="Espandi il pannello"></button>
+
+      <div class="status">
+        <div>
+          <h2 id="statusTitle">Cerco la tua posizione…</h2>
+          <p id="statusSub"></p>
+        </div>
+        <span class="badge" id="modeBadge" hidden></span>
+      </div>
+
+      <div class="destcard" id="destCard" hidden>
+        <span class="destico"><svg class="ic"><use href="#i-pin"/></svg></span>
+        <div class="destinfo">
+          <div class="destlabel" id="destLabel"></div>
+          <div class="destmeta" id="destMeta"></div>
+        </div>
+        <a class="chipbtn" id="destOpen" href="#" target="_blank" rel="noopener"><svg class="ic"><use href="#i-nav"/></svg>Vai</a>
+        <button class="xbtn" id="destClear" type="button" aria-label="Rimuovi la meta"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+
+      <ul class="people" id="people"></ul>
+
+      <nav class="dock" aria-label="Comandi">
+        <button type="button" id="micBtn" class="dockbtn mic"><span class="ico"><svg class="ic"><use href="#i-mic"/></svg></span><span class="lbl" id="micLbl">Microfono</span></button>
+        <button type="button" id="musicBtn" class="dockbtn"><span class="ico"><svg class="ic"><use href="#i-music"/></svg></span><span class="lbl">Musica</span></button>
+        <button type="button" id="destBtn" class="dockbtn"><span class="ico"><svg class="ic"><use href="#i-pin"/></svg></span><span class="lbl">Meta</span></button>
+        <button type="button" id="pipBtn" class="dockbtn"><span class="ico"><svg class="ic"><use href="#i-pip"/></svg></span><span class="lbl">Mini</span></button>
+      </nav>
     </section>
 
-    <!-- chiamata -->
-    <section id="callView" class="view" hidden>
-      <header class="bar">
-        <div>
-          <div class="eyebrow">Stanza</div>
-          <div class="roomcode mono" id="roomLabel">—</div>
+    <!-- scelta della meta -->
+    <section class="modal" id="destSheet" hidden aria-labelledby="destTitle">
+      <h3 id="destTitle">Condividi la meta</h3>
+      <p class="muted" id="destWhere">Tutti nella stanza la vedranno sulla mappa.</p>
+      <label class="fieldlbl" for="destName">Nome del posto</label>
+      <input id="destName" maxlength="40" placeholder="Bar Centrale, fontana, ingresso…" autocomplete="off">
+      <div class="modalbtns">
+        <button type="button" class="ghostbtn" id="destCancel">Annulla</button>
+        <button type="button" class="cta" id="destShare">Condividi</button>
+      </div>
+    </section>
+
+    <section class="modal" id="destChoose" hidden aria-labelledby="chooseTitle">
+      <h3 id="chooseTitle">Dove vi incontrate?</h3>
+      <div class="choices">
+        <button type="button" class="choice" id="chooseMap"><svg class="ic"><use href="#i-pin"/></svg><span><b>Scegli sulla mappa</b><small>Tocca il punto preciso</small></span></button>
+        <button type="button" class="choice" id="chooseHere"><svg class="ic"><use href="#i-locate"/></svg><span><b>Dove sono io</b><small>Usa la tua posizione attuale</small></span></button>
+      </div>
+      <button type="button" class="ghostbtn full" id="chooseCancel">Annulla</button>
+    </section>
+
+    <!-- impostazioni -->
+    <section class="modal tall" id="moreSheet" hidden aria-labelledby="moreTitle">
+      <div class="modalhead">
+        <h3 id="moreTitle">Impostazioni</h3>
+        <button class="xbtn" id="moreClose" type="button" aria-label="Chiudi"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+
+      <div class="group">
+        <div class="row">
+          <label for="radius">Raggio della chiamata</label>
+          <output id="radiusOut" class="mono" for="radius">1 km</output>
         </div>
-        <button class="ghost" id="shareBtn" type="button">Invita</button>
-      </header>
-
-      <section class="mapcard" aria-label="Mappa">
-        <div id="map"></div>
-        <button class="recenter" id="recenterBtn" type="button" hidden>Centra su di me</button>
-        <p class="maphint" id="mapHint">La mappa compare appena arriva la tua posizione.</p>
-      </section>
-
-      <section class="card status" id="statusCard">
-        <h2><span class="pulse"></span><span id="statusTitle">Cerco la tua posizione…</span></h2>
-        <p id="statusSub" class="sub"></p>
-        <ul class="people" id="people"></ul>
-        <p class="empty" id="emptyRoom">Nessun altro nella stanza. Invita qualcuno con il pulsante in alto.</p>
-      </section>
-
-      <section class="controls">
-        <button id="micBtn" type="button" aria-pressed="false">Microfono attivo</button>
-        <button id="pipBtn" type="button">Mini finestra</button>
-        <button id="wakeBtn" type="button" aria-pressed="false">Schermo sempre acceso</button>
-        <button id="pauseBtn" type="button" aria-pressed="false">Pausa</button>
-      </section>
-
-      <section class="card pipcard">
-        <video id="pipVideo" muted playsinline autopictureinpicture></video>
-        <p class="hint">Questa è la mini finestra. Aprila prima di cambiare app: su alcuni telefoni tiene viva la chiamata.</p>
-      </section>
-
-      <section class="card">
-        <label class="rowlabel" for="radius">Raggio <output id="radiusOut" class="mono" for="radius">1 km</output></label>
         <input type="range" id="radius" min="100" max="1000" step="50" value="1000">
-        <p class="hint">Entri in chiamata con qualcuno quando siete più vicini del raggio più piccolo tra i vostri due.</p>
-      </section>
+        <p class="muted small">Vale il raggio più piccolo tra i vostri due.</p>
+      </div>
 
-      <details class="card diag" id="diag" open>
+      <div class="group">
+        <label class="switchrow" for="pttToggle">
+          <span><b>Premi per parlare</b><small>Gli altri ti sentono solo mentre tieni premuto il microfono</small></span>
+          <input type="checkbox" id="pttToggle" class="switch">
+        </label>
+        <label class="switchrow" for="carKeysToggle">
+          <span><b>Tasti del volante e delle cuffie</b><small>Play/pausa accende e spegne il microfono</small></span>
+          <input type="checkbox" id="carKeysToggle" class="switch" checked>
+        </label>
+        <label class="switchrow" for="invisibleToggle">
+          <span><b>Invisibile</b><small>Sparisci dalla mappa e dalle chiamate</small></span>
+          <input type="checkbox" id="invisibleToggle" class="switch">
+        </label>
+        <label class="switchrow" for="wakeToggle">
+          <span><b>Schermo sempre acceso</b><small>La chiamata resta attiva, consuma più batteria</small></span>
+          <input type="checkbox" id="wakeToggle" class="switch">
+        </label>
+      </div>
+
+      <details class="group diag">
         <summary>Diagnostica secondo piano</summary>
         <dl class="live">
           <dt>Posizione</dt><dd id="dPos">in attesa</dd>
@@ -84,14 +186,18 @@
           <dt>Mini finestra</dt><dd id="dPip">chiusa</dd>
           <dt>Schermo acceso</dt><dd id="dWake">no</dd>
         </dl>
-        <p class="hint">Per provare: apri la mini finestra, passa a un'altra app per un minuto, poi torna qui. Sotto trovi cosa ha continuato a funzionare.</p>
+        <p class="muted small">Apri la mini finestra, passa a un'altra app per almeno 30 secondi e torna qui: sotto vedi cosa ha continuato a funzionare.</p>
         <ol class="away" id="awayLog"></ol>
       </details>
 
-      <button class="leave" id="leaveBtn" type="button">Esci dalla stanza</button>
+      <button class="leave" id="leaveBtn" type="button"><svg class="ic"><use href="#i-leave"/></svg>Esci dalla stanza</button>
     </section>
+
+    <div class="scrim" id="scrim" hidden></div>
   </main>
 
+  <!-- video della mini finestra: animazione disegnata su canvas -->
+  <video id="pipVideo" muted playsinline autopictureinpicture></video>
   <div id="audioSinks" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>

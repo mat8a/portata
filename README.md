@@ -14,7 +14,28 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
 - Per non entrare e uscire di continuo sul confine, si esce solo oltre il raggio + 10%.
 - **Mappa:** chi è nella stessa stanza ti vede sulla mappa (OpenStreetMap), insieme al cerchio
   da 1 km. Le posizioni non vengono salvate da nessuna parte e non arrivano a chi non ha il codice.
-  Con "Pausa" sparisci dalla mappa e dalle chiamate.
+  Con "Invisibile" (nelle impostazioni) sparisci dalla mappa e dalle chiamate.
+
+## I comandi
+
+- **Microfono:** tocca per spegnerlo o riaccenderlo.
+- **Premi per parlare** (impostazioni): il microfono diventa "Tieni premuto"; gli altri ti sentono
+  solo mentre lo tieni schiacciato.
+- **Musica:** metti in pausa il tuo microfono e restituisce l'audio al telefono, così puoi far
+  partire Spotify o Apple Music e continuare a sentire gli altri sopra la musica. Per parlare tocchi
+  (o tieni premuto) il microfono: iPhone ferma la musica mentre parli. Quando lasci, il microfono si
+  libera; se la musica non riparte da sola, premi play dal Centro di Controllo. Se fai partire la
+  musica mentre sei in chiamata, Portata se ne accorge e passa da sola alla modalità musica.
+  Mescolare musica e voci richiede iOS 17 o successivo; va provato sul proprio telefono.
+- **Meta:** scegli un punto sulla mappa (o la tua posizione), dagli un nome e condividilo. Tutti nella
+  stanza lo vedono, con la distanza di ognuno e il tasto **Vai** che apre le indicazioni a piedi
+  in Mappe (iPhone) o Google Maps. Chiunque può cambiarla o toglierla.
+- **Tasti del volante e delle cuffie** (impostazioni, attivo di serie): il tasto play/pausa del
+  volante (via Bluetooth), delle cuffie o degli AirPods accende e spegne il microfono. Sullo schermo
+  dell'auto compare lo stato ("Microfono acceso · In chiamata con Giulia"). Funziona quando l'audio
+  in riproduzione è Portata: se sta suonando Spotify, il tasto va a Spotify. Il tasto
+  "rispondi/riaggancia" e CarPlay non sono raggiungibili da una web app.
+- **Mini:** apre la mini finestra (Picture in Picture) con chi è in chiamata.
 
 ## File
 
@@ -74,12 +95,12 @@ La web app funziona bene con la pagina aperta. Il punto da verificare è cosa su
 cambi app. La sezione **Diagnostica secondo piano** serve proprio a questo.
 
 1. Entrate in due nella stessa stanza, vicini, e controllate di sentirvi.
-2. Sul telefono da provare tocca **Mini finestra**.
+2. Sul telefono da provare tocca **Mini**.
 3. Passa a un'altra app per almeno 30 secondi, e intanto l'altra persona parla.
 4. Torna in Portata. In Diagnostica trovi una riga come:
    *Fuori per 45 s · mini finestra aperta — Posizione aggiornata 6 volte, Microfono sempre attivo,
    Collegamento al server mantenuto.*
-5. Ripeti senza mini finestra e con **Schermo sempre acceso**, per confrontare.
+5. Ripeti senza mini finestra e con **Schermo sempre acceso** (impostazioni), per confrontare.
 
 Cosa aspettarsi, da verificare sul tuo telefono:
 

@@ -10,18 +10,13 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
-// versione "piatta": tutti i file stanno nella stessa cartella del server,
-// così si possono caricare su GitHub anche dal telefono. Si servono solo questi.
-const PUBLIC = __dirname;
-const SERVED = new Set(['index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png']);
 
 const MAX_RADIUS = 1000;        // metri, raggio massimo consentito
 const EXIT_MARGIN = 0.10;       // si esce solo oltre raggio + 10%
 const STALE_MS = 5 * 60 * 1000; // posizione considerata vecchia dopo 5 minuti
 const MAX_ROOM = 12;            // persone per stanza
 
-// STUN pubblico di Google. Per reti mobili difficili aggiungi un server TURN
-// con la variabile d'ambiente ICE_SERVERS (vedi README).
+// STUN pubblico di Google. Per le reti mobili serve anche un server TURN (vedi README).
 let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 if (process.env.ICE_SERVERS) {
   try { ICE = JSON.parse(process.env.ICE_SERVERS); }
@@ -37,6 +32,10 @@ if (process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
 }
 
 /* ---------------- file statici ---------------- */
+// Tutti i file stanno nella stessa cartella del server (si caricano su GitHub anche dal telefono).
+// Si servono solo questi.
+const PUBLIC = __dirname;
+const SERVED = new Set(['index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png']);
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -57,16 +56,15 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
-      // la pagina può usare microfono e posizione solo per sé
-      'Permissions-Policy': 'microphone=(self), geolocation=(self), screen-wake-lock=(self)',
+      'Permissions-Policy': 'microphone=(self), geolocation=(self), screen-wake-lock=(self), picture-in-picture=(self)',
     });
     res.end(data);
   });
 });
 
 /* ---------------- stanze ---------------- */
-// rooms: codice -> Map(id -> client)
-// client: { id, ws, name, pos:{lat,lon,acc,ts}|null, radius, paused, links:Set(id) }
+// rooms: codice -> { clients: Map(id -> client), dest: {lat,lon,label,byName,ts} | null }
+// client: { id, ws, name, pos, radius, paused, music, muted, links:Set(id) }
 const rooms = new Map();
 
 function haversine(a, b) {
@@ -78,12 +76,13 @@ function haversine(a, b) {
 
 const send = (c, msg) => { if (c.ws.readyState === 1) c.ws.send(JSON.stringify(msg)); };
 const hasFreshPos = c => c.pos && Date.now() - c.pos.ts < STALE_MS;
+const validLatLon = (lat, lon) => Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 
 function evaluate(code) {
   const room = rooms.get(code);
   if (!room) return;
-  const list = [...room.values()];
-  const dists = new Map(); // "a|b" -> metri
+  const list = [...room.clients.values()];
+  const dists = new Map();
 
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
@@ -116,29 +115,35 @@ function evaluate(code) {
       const d = dists.get(me.id + '|' + o.id);
       const showPos = hasFreshPos(o) && !o.paused;
       return {
-        lat: showPos ? +o.pos.lat.toFixed(5) : null,
-        lon: showPos ? +o.pos.lon.toFixed(5) : null,
-        acc: showPos ? Math.round(o.pos.acc) : null,
         id: o.id,
         name: o.name,
         distance: d == null ? null : Math.max(10, Math.round(d / 10) * 10),
+        lat: showPos ? +o.pos.lat.toFixed(5) : null,
+        lon: showPos ? +o.pos.lon.toFixed(5) : null,
         linked: me.links.has(o.id),
         paused: o.paused,
+        music: o.music,
+        muted: o.muted,
         hasPos: hasFreshPos(o),
       };
     });
-    send(me, { t: 'peers', peers, radius: me.radius });
+    send(me, { t: 'peers', peers });
   }
+}
+
+function broadcast(code, msg) {
+  const room = rooms.get(code);
+  if (room) for (const c of room.clients.values()) send(c, msg);
 }
 
 function leave(client, code) {
   const room = rooms.get(code);
   if (!room) return;
-  room.delete(client.id);
-  for (const other of room.values()) {
+  room.clients.delete(client.id);
+  for (const other of room.clients.values()) {
     if (other.links.delete(client.id)) send(other, { t: 'unlink', peer: client.id });
   }
-  if (room.size === 0) rooms.delete(code);
+  if (room.clients.size === 0) rooms.delete(code); // la meta sparisce con la stanza vuota
   else evaluate(code);
 }
 
@@ -158,24 +163,26 @@ wss.on('connection', ws => {
       code = String(m.room || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
       const name = String(m.name || '').trim().slice(0, 24);
       if (code.length < 3 || !name) return send({ ws }, { t: 'error', msg: 'Servono un nome e un codice stanza di almeno 3 caratteri.' });
-      if (!rooms.has(code)) rooms.set(code, new Map());
+      if (!rooms.has(code)) rooms.set(code, { clients: new Map(), dest: null });
       const room = rooms.get(code);
-      if (room.size >= MAX_ROOM) return send({ ws }, { t: 'error', msg: `La stanza ${code} è piena (massimo ${MAX_ROOM} persone).` });
+      if (room.clients.size >= MAX_ROOM) return send({ ws }, { t: 'error', msg: `La stanza ${code} è piena (massimo ${MAX_ROOM} persone).` });
       client = {
         id: crypto.randomUUID().slice(0, 8), ws, name,
-        pos: null, radius: clampRadius(m.radius), paused: false, links: new Set(),
+        pos: null, radius: clampRadius(m.radius), paused: !!m.paused, music: !!m.music, muted: !!m.muted, links: new Set(),
       };
-      room.set(client.id, client);
-      send(client, { t: 'welcome', id: client.id, room: code, ice: ICE, maxRadius: MAX_RADIUS, exitMargin: EXIT_MARGIN });
+      room.clients.set(client.id, client);
+      send(client, { t: 'welcome', id: client.id, room: code, ice: ICE, maxRadius: MAX_RADIUS, exitMargin: EXIT_MARGIN, dest: room.dest });
       evaluate(code);
       return;
     }
     if (!client) return;
+    const room = rooms.get(code);
+    if (!room) return;
 
     switch (m.t) {
       case 'pos': {
         const lat = +m.lat, lon = +m.lon, acc = +m.acc || 0;
-        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+        if (!validLatLon(lat, lon)) return;
         client.pos = { lat, lon, acc, ts: Date.now() };
         evaluate(code);
         break;
@@ -183,12 +190,28 @@ wss.on('connection', ws => {
       case 'settings': {
         if (m.radius != null) client.radius = clampRadius(m.radius);
         if (m.paused != null) client.paused = !!m.paused;
+        if (m.music != null) client.music = !!m.music;
+        if (m.muted != null) client.muted = !!m.muted;
         evaluate(code);
+        break;
+      }
+      case 'dest': {
+        if (m.clear) {
+          if (!room.dest) return;
+          room.dest = null;
+          broadcast(code, { t: 'dest', dest: null, by: client.name, byId: client.id });
+          return;
+        }
+        const lat = +m.lat, lon = +m.lon;
+        if (!validLatLon(lat, lon)) return;
+        const label = String(m.label || '').trim().slice(0, 40) || "Punto d'incontro";
+        room.dest = { lat: +lat.toFixed(6), lon: +lon.toFixed(6), label, byName: client.name, ts: Date.now() };
+        broadcast(code, { t: 'dest', dest: room.dest, by: client.name, byId: client.id });
         break;
       }
       case 'signal': {
         // inoltra offer/answer/candidati solo a chi è collegato
-        const room = rooms.get(code), to = room && room.get(m.to);
+        const to = room.clients.get(m.to);
         if (to && client.links.has(to.id)) send(to, { t: 'signal', from: client.id, data: m.data });
         break;
       }
