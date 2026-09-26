@@ -29,11 +29,13 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
   libera; se la musica non riparte da sola, premi play dal Centro di Controllo. Se fai partire la
   musica mentre sei in chiamata, Portata se ne accorge e passa da sola alla modalità musica.
   Mescolare musica e voci richiede iOS 17 o successivo; va provato sul proprio telefono.
-- **Meta:** cerca un indirizzo o un posto (i risultati vicini a te sono favoriti), oppure tocca un
-  punto sulla mappa o usa la tua posizione; dagli un nome e condividilo. Tutti nella stanza la
-  vedono, con la distanza di ognuno. Chiunque può cambiarla o toglierla. La ricerca usa
-  OpenStreetMap (Photon, più Nominatim quando Photon trova poco) tramite il server; se il server
-  non risponde, il telefono chiede direttamente a Photon. Nessuna chiave da configurare.
+- **Meta:** cerca un indirizzo, un locale o un posto, oppure tocca un punto sulla mappa o usa la tua
+  posizione; dagli un nome e condividilo. Tutti nella stanza la vedono, con la distanza di ognuno.
+  Chiunque può cambiarla o toglierla. La ricerca interroga insieme più fonti gratuite, senza chiavi:
+  Photon e Overpass (OpenStreetMap), Esri World Geocoder (molto completo su bar, negozi e locali) e,
+  se trovano poco, Nominatim. I risultati vengono uniti, i doppioni tolti, e prima compaiono quelli
+  che corrispondono meglio e sono più vicini, con il tipo di posto. Se il server non risponde, il
+  telefono chiede direttamente a Photon.
 - **Vai:** apre le indicazioni stradali in auto verso la meta. La prima volta scegli l'app (Apple
   Mappe, Google Maps, Waze); con "Ricorda la scelta" le volte dopo si apre direttamente. Si cambia
   in Impostazioni → App per le indicazioni. Su iPhone Mappe e Google Maps si aprono con il loro
@@ -49,8 +51,9 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
   diventano chiari sulla mappa Standard e scuri sulle altre, per restare leggibili.
 - **Persone** (in alto a sinistra): toccane una per centrare la mappa su di lei. Con il tasto
   altoparlante accanto a chi è in chiamata la silenzi solo per te (lei continua a sentirti);
-  la scelta si ricorda. Tutti gli altri si sentono sempre a volume pieno. Il tasto con la freccia,
-  sopra la barra dei comandi, riporta la mappa su di te e sul cerchio da 1 km.
+  la scelta si ricorda. Tutti gli altri si sentono sempre a volume pieno.
+- **Tasto con la freccia** (sopra la barra dei comandi): il primo tocco ti centra da vicino, il
+  secondo mostra tutto il cerchio da 1 km.
 - **Mini** (impostazioni): apre la mini finestra (Picture in Picture) con chi è in chiamata.
 
 ## File

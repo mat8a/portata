@@ -64,85 +64,159 @@ const server = http.createServer((req, res) => {
 });
 
 /* ---------------- ricerca indirizzi ---------------- */
-// Usa Photon (OpenStreetMap, pensato per la ricerca mentre scrivi) e, se non risponde,
-// Nominatim. Le risposte restano in memoria per un po' per non ripetere le stesse richieste.
+// Più fonti gratuite, senza chiavi, interrogate insieme:
+//  - Photon (OpenStreetMap, pensato per la ricerca mentre scrivi)
+//  - Esri World Geocoder (molto completo su negozi, bar, locali e indirizzi)
+//  - Overpass (cerca per nome i posti di OpenStreetMap intorno a te)
+//  - Nominatim (OpenStreetMap, solo se le altre trovano poco: ha limiti d'uso stretti)
+// I risultati si uniscono, si tolgono i doppioni e si ordinano per somiglianza al testo e vicinanza.
 const PHOTON_URL = process.env.PHOTON_URL || 'https://photon.komoot.io/api/';
+const ESRI_URL = process.env.ESRI_URL || 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates';
+const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org/search';
-const UA = 'Portata/0.3 (chiamata di prossimita; https://github.com)';
+const UA = 'Portata/0.4 (chiamata di prossimita)';
 const geoCache = new Map();
+
+// tipi di posto in italiano (OpenStreetMap)
+const KIND = {
+  cafe: 'Bar', bar: 'Bar', pub: 'Pub', restaurant: 'Ristorante', fast_food: 'Fast food', ice_cream: 'Gelateria',
+  pizza: 'Pizzeria', bakery: 'Panetteria', supermarket: 'Supermercato', convenience: 'Alimentari', mall: 'Centro commerciale',
+  pharmacy: 'Farmacia', hospital: 'Ospedale', clinic: 'Clinica', fuel: 'Benzinaio', parking: 'Parcheggio',
+  station: 'Stazione', halt: 'Stazione', bus_station: 'Autostazione', bus_stop: 'Fermata bus', tram_stop: 'Fermata tram', subway_entrance: 'Metro',
+  park: 'Parco', garden: 'Giardino', playground: 'Parco giochi', stadium: 'Stadio', sports_centre: 'Centro sportivo', pitch: 'Campo sportivo',
+  hotel: 'Hotel', museum: 'Museo', cinema: 'Cinema', theatre: 'Teatro', nightclub: 'Discoteca', library: 'Biblioteca',
+  school: 'Scuola', university: 'Università', college: 'Scuola', place_of_worship: 'Chiesa', church: 'Chiesa', square: 'Piazza',
+  townhall: 'Municipio', police: 'Polizia', post_office: 'Poste', bank: 'Banca', atm: 'Bancomat', gym: 'Palestra', fitness_centre: 'Palestra',
+  city: 'Città', town: 'Città', village: 'Paese', suburb: 'Quartiere', neighbourhood: 'Quartiere', house: 'Indirizzo', street: 'Via',
+};
 
 function json(res, obj, status = 200) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
 }
+async function getJson(u, opts = {}) {
+  const r = await fetch(u, { ...opts, headers: { 'User-Agent': UA, 'Accept-Language': 'it', ...(opts.headers || {}) }, signal: AbortSignal.timeout(opts.timeout || 6000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+const clean = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+function metres(a, b) { return haversine(a, b); }
 
 async function geocode(url, res) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
   const lat = parseFloat(url.searchParams.get('lat')), lon = parseFloat(url.searchParams.get('lon'));
-  const near = validLatLon(lat, lon);
+  const near = validLatLon(lat, lon) ? { lat, lon } : null;
   if (q.length < 2) return json(res, { results: [] });
-  const key = q.toLowerCase() + '|' + (near ? `${lat.toFixed(2)},${lon.toFixed(2)}` : '');
+  const key = clean(q) + '|' + (near ? `${lat.toFixed(2)},${lon.toFixed(2)}` : '');
   const hit = geoCache.get(key);
   if (hit && Date.now() - hit.ts < 30 * 60 * 1000) return json(res, { results: hit.results });
 
-  // prima Photon; se non risponde o trova poco, anche Nominatim, e si uniscono i risultati
-  let results = [], errors = [];
-  try { results = await photon(q, near && lat, near && lon); } catch (e) { errors.push('photon ' + e.message); }
-  if (results.length < 2) {
-    try {
-      const more = await nominatim(q, near && lat, near && lon);
-      const key = r => r.name.toLowerCase() + Math.round(r.lat * 1000) + Math.round(r.lon * 1000);
-      const seen = new Set(results.map(key));
-      for (const r of more) if (!seen.has(key(r))) { seen.add(key(r)); results.push(r); }
-    } catch (e) { errors.push('nominatim ' + e.message); }
+  const jobs = [photon(q, near), esri(q, near)];
+  if (near && q.length >= 3) jobs.push(overpass(q, near));
+  const settled = await Promise.allSettled(jobs);
+  let all = settled.filter(s => s.status === 'fulfilled').flatMap(s => s.value);
+  if (all.length < 3) {
+    try { all = all.concat(await nominatim(q, near)); } catch (e) { settled.push({ status: 'rejected', reason: e }); }
   }
-  if (!results.length && errors.length === 2) {
-    console.error('ricerca non riuscita:', errors.join(' / '));
+  const failed = settled.filter(s => s.status === 'rejected').map(s => s.reason && s.reason.message);
+  if (!all.length && failed.length >= jobs.length) {
+    console.error('ricerca non riuscita:', failed.join(' / '));
     return json(res, { results: [], error: 'Ricerca non disponibile al momento. Riprova tra poco o scegli il punto sulla mappa.' }, 502);
   }
-  results = results.slice(0, 8);
+  const results = rank(dedupe(all), q, near).slice(0, 8);
   if (geoCache.size > 500) geoCache.delete(geoCache.keys().next().value);
   geoCache.set(key, { ts: Date.now(), results });
   json(res, { results });
 }
 
-async function getJson(u) {
-  const r = await fetch(u, { headers: { 'User-Agent': UA, 'Accept-Language': 'it' }, signal: AbortSignal.timeout(6000) });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+function dedupe(list) {
+  const out = [];
+  for (const r of list) {
+    if (!r.name || !validLatLon(r.lat, r.lon)) continue;
+    const twin = out.find(o => clean(o.name) === clean(r.name) && metres(o, r) < 150);
+    if (twin) { if (!twin.kind && r.kind) twin.kind = r.kind; if ((r.detail || '').length > (twin.detail || '').length) twin.detail = r.detail; continue; }
+    out.push({ ...r });
+  }
+  return out;
+}
+function rank(list, q, near) {
+  const cq = clean(q), words = cq.split(/\s+/).filter(Boolean);
+  for (const r of list) {
+    const n = clean(r.name), full = n + ' ' + clean(r.detail);
+    let s = 0;
+    if (n === cq) s += 6; else if (n.startsWith(cq)) s += 4; else if (n.includes(cq)) s += 3;
+    s += words.filter(w => full.includes(w)).length / Math.max(1, words.length) * 3;
+    if (near) {
+      const km = metres(near, r) / 1000;
+      s += km < 1 ? 2.5 : km < 3 ? 2 : km < 10 ? 1.2 : km < 50 ? 0.5 : 0;
+      r.dist = Math.round(km * 1000);
+    }
+    r.score = s + (r.boost || 0);
+  }
+  return list.sort((a, b) => b.score - a.score).map(({ score, boost, ...r }) => r);
 }
 
-async function photon(q, lat, lon) {
+async function photon(q, near) {
   const u = new URL(PHOTON_URL);
-  u.searchParams.set('q', q);
-  u.searchParams.set('limit', '7');
-  if (lat !== false && lat != null) { u.searchParams.set('lat', lat); u.searchParams.set('lon', lon); }
+  u.searchParams.set('q', q); u.searchParams.set('limit', '8');
+  if (near) { u.searchParams.set('lat', near.lat); u.searchParams.set('lon', near.lon); }
   const j = await getJson(u);
-  const seen = new Set();
   return (j.features || []).map(f => {
     const p = f.properties || {};
     const [flon, flat] = (f.geometry && f.geometry.coordinates) || [];
     const street = [p.street, p.housenumber].filter(Boolean).join(' ');
     const name = p.name || street || p.city || '';
-    const detail = [p.name && street ? street : null, p.postcode, p.city || p.town || p.village || p.county, p.country]
+    const detail = [p.name && street ? street : null, p.city || p.town || p.village || p.county, p.country !== 'Italia' ? p.country : null]
       .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && v !== name).join(', ');
-    return { name, detail, lat: +flat, lon: +flon };
-  }).filter(r => r.name && validLatLon(r.lat, r.lon) && !seen.has(r.name + r.detail) && seen.add(r.name + r.detail));
+    return { name, detail, kind: KIND[p.osm_value] || '', lat: +flat, lon: +flon, src: 'photon' };
+  });
 }
 
-async function nominatim(q, lat, lon) {
+async function esri(q, near) {
+  const u = new URL(ESRI_URL);
+  u.searchParams.set('SingleLine', q); u.searchParams.set('f', 'json'); u.searchParams.set('maxLocations', '8');
+  u.searchParams.set('outFields', 'PlaceName,Place_addr,Type,City,StAddr'); u.searchParams.set('langCode', 'IT');
+  if (near) u.searchParams.set('location', `${near.lon},${near.lat}`);
+  const j = await getJson(u);
+  return (j.candidates || []).filter(c => c.score >= 75).map(c => {
+    const a = c.attributes || {};
+    const name = a.PlaceName || String(c.address || '').split(',')[0];
+    const addr = String(a.Place_addr || c.address || '').split(',').map(s => s.trim()).filter(s => s && s !== name && !/^\d{5}$/.test(s)).slice(0, 2).join(', ');
+    return { name, detail: addr, kind: a.Type ? italianType(a.Type) : '', lat: +c.location.y, lon: +c.location.x, src: 'esri', boost: a.PlaceName ? 0.3 : 0 };
+  });
+}
+function italianType(t) {
+  const m = { 'Bar or Pub': 'Bar', 'Coffee Shop': 'Bar', Restaurant: 'Ristorante', Pizza: 'Pizzeria', 'Fast Food': 'Fast food', Pharmacy: 'Farmacia',
+    Hospital: 'Ospedale', 'Gas Station': 'Benzinaio', Parking: 'Parcheggio', 'Train Station': 'Stazione', Park: 'Parco', Hotel: 'Hotel',
+    Museum: 'Museo', 'Movie Theater': 'Cinema', 'Grocery': 'Supermercato', 'Shopping Center': 'Centro commerciale', School: 'Scuola',
+    College: 'Università', Church: 'Chiesa', Bank: 'Banca', 'Night Club': 'Discoteca', 'Sports Center': 'Centro sportivo', Stadium: 'Stadio',
+    City: 'Città', Neighborhood: 'Quartiere', 'Point Address': 'Indirizzo', 'Street Address': 'Indirizzo', 'Street Name': 'Via' };
+  return m[t] || '';
+}
+
+async function overpass(q, near) {
+  // nomi dei posti entro 8 km che contengono il testo (senza distinguere maiuscole)
+  const re = q.replace(/[\\^$.*+?()[\]{}|"]/g, '\\$&').replace(/\s+/g, '.*');
+  const body = `[out:json][timeout:6];nwr["name"~"${re}",i](around:8000,${near.lat},${near.lon});out center 12;`;
+  const j = await getJson(OVERPASS_URL, { method: 'POST', body: 'data=' + encodeURIComponent(body), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 7000 });
+  return (j.elements || []).map(e => {
+    const t = e.tags || {}, lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
+    const kindKey = t.amenity || t.shop || t.leisure || t.railway || t.tourism || t.public_transport || t.place || t.highway;
+    const detail = [[t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' '), t['addr:city']].filter(Boolean).join(', ');
+    return { name: t.name, detail, kind: KIND[kindKey] || '', lat: +lat, lon: +lon, src: 'overpass', boost: 0.2 };
+  });
+}
+
+async function nominatim(q, near) {
   const u = new URL(NOMINATIM_URL);
-  u.searchParams.set('format', 'jsonv2');
-  u.searchParams.set('q', q);
-  u.searchParams.set('limit', '7');
-  u.searchParams.set('accept-language', 'it');
-  if (lat !== false && lat != null) u.searchParams.set('viewbox', `${lon - 0.3},${lat + 0.3},${lon + 0.3},${lat - 0.3}`);
+  u.searchParams.set('format', 'jsonv2'); u.searchParams.set('q', q); u.searchParams.set('limit', '6'); u.searchParams.set('accept-language', 'it');
+  if (near) u.searchParams.set('viewbox', `${near.lon - 0.3},${near.lat + 0.3},${near.lon + 0.3},${near.lat - 0.3}`);
   const j = await getJson(u);
   return (j || []).map(r => {
     const parts = String(r.display_name || '').split(',').map(s => s.trim());
     const name = r.name || parts[0] || '';
-    return { name, detail: parts.slice(r.name ? 1 : 1, 4).join(', '), lat: +r.lat, lon: +r.lon };
-  }).filter(r => r.name && validLatLon(r.lat, r.lon));
+    return { name, detail: parts.slice(1, 3).join(', '), kind: KIND[r.type] || '', lat: +r.lat, lon: +r.lon, src: 'nominatim' };
+  });
 }
 
 /* ---------------- stanze ---------------- */

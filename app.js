@@ -822,7 +822,7 @@ async function runSearch(q) {
   }
   list.innerHTML = lastResults.map((r, i) => {
     const dist = state.lastPos ? fmtD(distM(state.lastPos, r)) : '';
-    return `<li><button type="button" data-i="${i}"><b>${esc(r.name)}</b><small>${esc(r.detail || '')}</small><span class="rdist">${dist}</span></button></li>`;
+    return `<li><button type="button" data-i="${i}"><b>${esc(r.name)}</b><small>${esc([r.kind, r.detail].filter(Boolean).join(' · '))}</small><span class="rdist">${dist}</span></button></li>`;
   }).join('');
 }
 $('#destResults').addEventListener('click', e => {
@@ -993,12 +993,20 @@ function initMap() {
   }
   map.m.touchZoomRotate.disableRotation();
   map.m.on('style.load', () => { addOverlay(); map.ready = true; updateMap(); });
-  map.m.on('dragstart', () => { map.follow = false; });
+  map.m.on('dragstart', () => { map.follow = false; map.closeUp = false; });
   map.m.on('click', e => {
     $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false');
     if (state.picking) setPending({ lat: e.lngLat.lat, lon: e.lngLat.lng });
   });
-  $('#recenterBtn').addEventListener('click', () => { map.follow = true; fitRadius(); });
+  // come su Google Maps: primo tocco ti centra da vicino, il secondo mostra tutto il cerchio
+  $('#recenterBtn').addEventListener('click', () => {
+    if (!state.lastPos) return toast('Aspetto ancora la tua posizione.');
+    const { lat, lon } = state.lastPos;
+    const centred = map.follow && distM({ lat: map.m.getCenter().lat, lon: map.m.getCenter().lng }, { lat, lon }) < 60;
+    map.follow = true;
+    if (map.closeUp && centred) { map.closeUp = false; fitRadius(); }
+    else { map.closeUp = true; map.m.easeTo({ center: [lon, lat], zoom: 16.5, padding: pad(), duration: 700 }); }
+  });
   document.querySelectorAll('#layersMenu button').forEach(b => b.classList.toggle('on', b.dataset.style === state.mapStyle));
 }
 
