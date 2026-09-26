@@ -85,15 +85,22 @@ async function geocode(url, res) {
   const hit = geoCache.get(key);
   if (hit && Date.now() - hit.ts < 30 * 60 * 1000) return json(res, { results: hit.results });
 
-  let results;
-  try { results = await photon(q, near && lat, near && lon); }
-  catch (e1) {
-    try { results = await nominatim(q, near && lat, near && lon); }
-    catch (e2) {
-      console.error('ricerca non riuscita:', e1.message, '/', e2.message);
-      return json(res, { results: [], error: 'Ricerca non disponibile al momento. Riprova tra poco o scegli il punto sulla mappa.' }, 502);
-    }
+  // prima Photon; se non risponde o trova poco, anche Nominatim, e si uniscono i risultati
+  let results = [], errors = [];
+  try { results = await photon(q, near && lat, near && lon); } catch (e) { errors.push('photon ' + e.message); }
+  if (results.length < 2) {
+    try {
+      const more = await nominatim(q, near && lat, near && lon);
+      const key = r => r.name.toLowerCase() + Math.round(r.lat * 1000) + Math.round(r.lon * 1000);
+      const seen = new Set(results.map(key));
+      for (const r of more) if (!seen.has(key(r))) { seen.add(key(r)); results.push(r); }
+    } catch (e) { errors.push('nominatim ' + e.message); }
   }
+  if (!results.length && errors.length === 2) {
+    console.error('ricerca non riuscita:', errors.join(' / '));
+    return json(res, { results: [], error: 'Ricerca non disponibile al momento. Riprova tra poco o scegli il punto sulla mappa.' }, 502);
+  }
+  results = results.slice(0, 8);
   if (geoCache.size > 500) geoCache.delete(geoCache.keys().next().value);
   geoCache.set(key, { ts: Date.now(), results });
   json(res, { results });

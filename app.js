@@ -542,8 +542,6 @@ function render() {
   $('#statusPill').hidden = !(!state.wsOk || state.invisible || !state.lastPos);
   const live = livePeers().length;
   $('#liveDot').classList.toggle('on', live > 0);
-  const n = state.peers.size + 1;
-  $('#onlineCount').textContent = n === 1 ? 'solo tu' : `${n} nella stanza`;
 
   const badge = $('#modeBadge');
   const b = state.invisible ? ['invisible', 'Invisibile'] : state.music ? ['music', 'Musica'] : (state.muted && !state.ptt) ? ['muted', 'Muto'] : null;
@@ -570,7 +568,11 @@ function renderPeople() {
   const order = { live: 0, connecting: 1, out: 2, nopos: 3, paused: 4 };
   const list = [...state.peers.values()].sort((a, b) =>
     order[peerStatus(a)[0]] - order[peerStatus(b)[0]] || (a.distance ?? 1e9) - (b.distance ?? 1e9));
-  $('#people').innerHTML = list.map(p => {
+  const MAX = 5, extra = list.length - MAX;
+  const shown = state.showAllPeople || extra <= 0 ? list : list.slice(0, MAX - 1);
+  const moreBtn = extra > 0
+    ? `<li><button type="button" class="more glass" data-more>${state.showAllPeople ? 'Mostra meno' : `+${list.length - shown.length} altri`}</button></li>` : '';
+  $('#people').innerHTML = shown.map(p => {
     const [cls, label] = peerStatus(p);
     const tag = p.music ? '<span class="tag music"><svg class="ic"><use href="#i-music"/></svg></span>'
       : p.muted && cls === 'live' ? '<span class="tag muted"><svg class="ic"><use href="#i-mic-off"/></svg></span>' : '';
@@ -583,17 +585,17 @@ function renderPeople() {
         <span class="av">${esc((p.name[0] || '?').toUpperCase())}${tag}</span>
         <span class="pinfo"><span class="pname">${esc(p.name)}</span><span class="pmeta">${dist}<span class="pstate${off && p.linked ? ' off' : ''}">${esc(off && p.linked ? 'Silenziato da te' : label)}</span></span></span>
       </button>${spk}</li>`;
-  }).join('');
+  }).join('') + moreBtn;
 }
 // tocca una persona: la mappa va su di lei; tocca l'altoparlante: la silenzi solo per te
 $('#people').addEventListener('click', e => {
+  if (e.target.closest('[data-more]')) { state.showAllPeople = !state.showAllPeople; return renderPeople(); }
   const s = e.target.closest('[data-spk]');
   if (s) { const p = state.peers.get(s.dataset.spk); if (p) toggleSilence(p); return; }
   const b = e.target.closest('[data-go]'); if (!b) return;
   const p = state.peers.get(b.dataset.go);
   if (!p || p.lat == null || !map.m) return toast(`${p ? p.name : 'Questa persona'} non ha una posizione da mostrare`);
-  map.follow = false;
-  map.m.flyTo([p.lat, p.lon], Math.max(map.m.getZoom(), 16), { duration: 0.8 });
+  flyToPoint(p.lat, p.lon);
 });
 // tocca lo stato: se sei solo inviti, altrimenti torni a vedere tutto il cerchio
 $('#statusPill').addEventListener('click', () => {
@@ -658,11 +660,19 @@ const NAV_APPS = [
   { id: 'waze', name: 'Waze', color: '#33CCFF', letter: 'W', modes: ['car'] },
 ];
 state.navApp = load('navApp') || '';
-state.navMode = load('navMode') || 'walk';
+// Su iPhone si usa il collegamento diretto all'app (maps:// e comgooglemaps://): il link web
+// ignora la modalità e apre sempre in auto.
 function navUrl(app, mode, d) {
   const ll = `${d.lat},${d.lon}`;
-  if (app === 'apple') return `https://maps.apple.com/?daddr=${ll}&dirflg=${{ walk: 'w', car: 'd', transit: 'r' }[mode]}`;
-  if (app === 'google') return `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=${{ walk: 'walking', car: 'driving', transit: 'transit' }[mode]}`;
+  if (app === 'apple') {
+    const flg = { walk: 'w', car: 'd', transit: 'r' }[mode];
+    return isIOS ? `maps://?daddr=${ll}&dirflg=${flg}` : `https://maps.apple.com/?daddr=${ll}&dirflg=${flg}`;
+  }
+  if (app === 'google') {
+    return isIOS
+      ? `comgooglemaps://?daddr=${ll}&directionsmode=${{ walk: 'walking', car: 'driving', transit: 'transit' }[mode]}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=${{ walk: 'walking', car: 'driving', transit: 'transit' }[mode]}`;
+  }
   if (app === 'waze') return `https://waze.com/ul?ll=${ll}&navigate=yes`;
   return '#';
 }
@@ -677,8 +687,8 @@ function renderDest() {
   parts.push(`da ${d.byName}`);
   $('#destMeta').textContent = parts.join(' · ');
   const open = $('#destOpen');
-  const mode = NAV_APPS.find(a => a.id === state.navApp)?.modes.includes(state.navMode) ? state.navMode : 'car';
-  open.href = state.navApp ? navUrl(state.navApp, mode, d) : '#';
+  open.href = state.navApp ? navUrl(state.navApp, 'car', d) : '#';
+  setLinkTarget(open);
 }
 $('#destOpen').addEventListener('click', e => {
   if (!state.dest) return e.preventDefault();
@@ -686,29 +696,32 @@ $('#destOpen').addEventListener('click', e => {
 });
 
 function openNavSheet() {
-  const r = document.querySelector(`input[name=navMode][value="${state.navMode}"]`);
-  if (r) r.checked = true;
   renderNavApps();
   openModal('#navSheet');
 }
 function renderNavApps() {
   const d = state.dest; if (!d) return;
-  const mode = document.querySelector('input[name=navMode]:checked')?.value || 'walk';
   const apps = isIOS ? NAV_APPS : [NAV_APPS[1], NAV_APPS[2], NAV_APPS[0]]; // su iPhone Apple Mappe per prima
-  $('#navApps').innerHTML = apps.map(a => {
-    const ok = a.modes.includes(mode);
-    const note = ok ? { walk: 'A piedi', car: 'In auto', transit: 'Con i mezzi' }[mode] : 'Solo in auto';
-    return `<a class="appbtn" data-app="${a.id}" href="${ok ? navUrl(a.id, mode, d) : navUrl(a.id, 'car', d)}" target="_blank" rel="noopener">
-      <span class="logo" style="background:${a.color}">${a.letter}</span><span><b>${a.name}</b><small>${note}</small></span></a>`;
-  }).join('');
+  $('#navApps').innerHTML = apps.map(a => `<a class="appbtn" data-app="${a.id}" href="${navUrl(a.id, 'car', d)}" rel="noopener">
+      <span class="logo" style="background:${a.color}">${a.letter}</span><span><b>${a.name}</b><small>Indicazioni in auto</small></span></a>`).join('');
+  $('#navApps').querySelectorAll('.appbtn').forEach(setLinkTarget);
 }
-document.querySelectorAll('input[name=navMode]').forEach(r => r.addEventListener('change', renderNavApps));
+// i link web si aprono in una nuova scheda (la chiamata resta qui); quelli delle app no
+function setLinkTarget(a) {
+  if (/^https?:/.test(a.getAttribute('href'))) a.target = '_blank'; else a.removeAttribute('target');
+}
+// se l'app scelta non è installata, iPhone non apre niente: lo diciamo
+function watchAppOpen(app) {
+  if (!isIOS || app !== 'google') return;
+  setTimeout(() => { if (!document.hidden) toast('Google Maps non si è aperta: forse non è installata. Scegli un\'altra app nelle impostazioni.', 'bad'); }, 1800);
+}
+$('#destOpen').addEventListener('click', () => { if (state.navApp) watchAppOpen(state.navApp); });
 $('#navApps').addEventListener('click', e => {
+  const link = e.target.closest('.appbtn'); if (link) watchAppOpen(link.dataset.app);
   const a = e.target.closest('.appbtn'); if (!a) return;
-  const mode = document.querySelector('input[name=navMode]:checked')?.value || 'walk';
   if ($('#navRemember').checked) {
-    state.navApp = a.dataset.app; state.navMode = mode;
-    store('navApp', state.navApp); store('navMode', mode);
+    state.navApp = a.dataset.app;
+    store('navApp', state.navApp);
     $('#navPref').value = state.navApp;
     renderDest();
   }
@@ -738,7 +751,7 @@ $('#chooseMap').addEventListener('click', () => {
   closeModals();
   state.picking = true;
   $('#pickBar').hidden = false;
-  if (map.m) map.m.getContainer().style.cursor = 'crosshair';
+  if (map.m) map.m.getCanvas().style.cursor = 'crosshair';
 });
 $('#chooseHere').addEventListener('click', () => {
   if (!state.lastPos) return toast('Aspetto ancora la tua posizione.', 'bad');
@@ -748,13 +761,13 @@ $('#pickCancel').addEventListener('click', stopPicking);
 function stopPicking() {
   state.picking = false;
   $('#pickBar').hidden = true;
-  if (map.m) map.m.getContainer().style.cursor = '';
+  if (map.m) map.m.getCanvas().style.cursor = '';
 }
 function setPending(pt, label = '', fly = false) {
   stopPicking();
   state.pending = pt;
   drawPending();
-  if (fly && map.m) { map.follow = false; map.m.flyTo([pt.lat, pt.lon], Math.max(map.m.getZoom(), 16), { duration: 0.8 }); }
+  if (fly) flyToPoint(pt.lat, pt.lon);
   $('#destWhere').textContent = state.lastPos
     ? `A ${fmtD(distM(state.lastPos, pt))} da te. Tutti nella stanza la vedranno sulla mappa.`
     : 'Tutti nella stanza la vedranno sulla mappa.';
@@ -786,6 +799,21 @@ async function runSearch(q) {
     const r = await fetch('/geocode?' + params);
     data = await r.json();
   } catch { data = { results: [], error: 'Ricerca non disponibile: controlla la connessione.' }; }
+  // se il server non ce la fa, chiede direttamente a Photon dal telefono
+  if (!data.results?.length && data.error) {
+    try {
+      const u = new URL('https://photon.komoot.io/api/');
+      u.searchParams.set('q', q); u.searchParams.set('limit', '7');
+      if (state.lastPos) { u.searchParams.set('lat', state.lastPos.lat.toFixed(4)); u.searchParams.set('lon', state.lastPos.lon.toFixed(4)); }
+      const j = await (await fetch(u)).json();
+      const results = (j.features || []).map(f => {
+        const p = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+        const street = [p.street, p.housenumber].filter(Boolean).join(' ');
+        return { name: p.name || street || p.city || '', detail: [p.city || p.town || p.village, p.country].filter(Boolean).join(', '), lat, lon };
+      }).filter(r => r.name);
+      if (results.length) data = { results };
+    } catch {}
+  }
   if (seq !== searchSeq) return; // è arrivata una ricerca più recente
   lastResults = data.results || [];
   if (!lastResults.length) {
@@ -894,36 +922,52 @@ async function share() {
   try { await navigator.clipboard.writeText(url); toast('Link della stanza copiato'); }
   catch { toast(url); }
 }
-$('#shareBtn').addEventListener('click', share);
 $('#roomPill').addEventListener('click', share);
 
 /* ---------------- mappa ---------------- */
-// Stili: Standard (CARTO Voyager, chiara e pulita come Google Maps), Scura (CARTO Dark Matter),
-// Satellite (Esri World Imagery con i nomi delle strade sopra).
-const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
-const CARTO = '&copy; <a href="https://carto.com/attributions">CARTO</a>';
-const carto = path => `https://{s}.basemaps.cartocdn.com/${path}/{z}/{x}/{y}{r}.png`;
+// Mappa vettoriale MapLibre con gli stili gratuiti di OpenFreeMap (nessuna chiave, nessun limite).
+// Standard: "liberty", chiara e pulita, simile a Google Maps. Scura: "dark".
+// Satellite: immagini Esri con strade e nomi sopra.
+const OFM = 'https://tiles.openfreemap.org/styles/';
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const SAT_STYLE = {
+  version: 8,
+  sources: {
+    sat: { type: 'raster', tileSize: 256, maxzoom: 19, attribution: 'Immagini &copy; Esri, Maxar, Earthstar Geographics',
+      tiles: [ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}'] },
+    roads: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: [ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'] },
+    places: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: [ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'] },
+  },
+  layers: [
+    { id: 'sat', type: 'raster', source: 'sat' },
+    { id: 'roads', type: 'raster', source: 'roads', paint: { 'raster-opacity': 0.85 } },
+    { id: 'places', type: 'raster', source: 'places' },
+  ],
+};
+const STYLES = { std: OFM + 'liberty', dark: OFM + 'dark', sat: SAT_STYLE };
 state.mapStyle = ['std', 'dark', 'sat'].includes(load('mapStyle')) ? load('mapStyle') : 'std';
-let baseLayers = [];
+
+const map = { m: null, ready: false, me: null, destMk: null, pendingMk: null, markers: new Map(), follow: true, fitted: false, lastHere: null };
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sheetH = () => parseInt(cssVar('--sheet-h')) || 0;
+const pad = () => ({ top: 90, bottom: sheetH() + 20, left: 24, right: 24 });
+
+// i pannelli in vetro prendono il tono della mappa sotto: chiari sulla mappa chiara, scuri sulle altre
+function applyTone() {
+  const tone = state.mapStyle === 'std' ? 'light' : 'dark';
+  $('#callView').dataset.tone = tone;
+}
+
 function setMapStyle(style) {
-  if (!map.m) return;
   state.mapStyle = style; store('mapStyle', style);
-  baseLayers.forEach(l => l.remove()); baseLayers = [];
-  const opts = { maxZoom: 20, subdomains: 'abcd', detectRetina: false };
-  if (style === 'sat') {
-    baseLayers.push(L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 19, maxNativeZoom: 19, attribution: 'Immagini &copy; Esri' }));
-    baseLayers.push(L.tileLayer(carto('rastertiles/voyager_only_labels'), { ...opts, attribution: `${OSM} ${CARTO}` }));
-  } else if (style === 'dark') {
-    baseLayers.push(L.tileLayer(carto('dark_all'), { ...opts, attribution: `${OSM} ${CARTO}` }));
-  } else {
-    baseLayers.push(L.tileLayer(carto('rastertiles/voyager'), { ...opts, className: 'tiles-std', attribution: `${OSM} ${CARTO}` }));
-  }
-  baseLayers.forEach(l => l.addTo(map.m).bringToBack());
+  applyTone();
   document.querySelectorAll('#layersMenu button').forEach(b => {
     b.classList.toggle('on', b.dataset.style === style);
     b.setAttribute('aria-checked', String(b.dataset.style === style));
   });
+  if (!map.m) return;
+  map.ready = false;
+  map.m.setStyle(STYLES[style]);
 }
 $('#layersBtn').addEventListener('click', e => {
   const menu = $('#layersMenu'); menu.hidden = !menu.hidden;
@@ -934,46 +978,77 @@ $('#layersMenu').addEventListener('click', e => {
   setMapStyle(b.dataset.style);
   $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false');
 });
-const map = { m: null, me: null, radius: null, margin: null, destMk: null, pendingMk: null, markers: new Map(), lines: new Map(), follow: true, fitted: false, lastHere: null };
-const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const sheetH = () => parseInt(cssVar('--sheet-h')) || 0;
 
 function initMap() {
-  if (!window.L) { toast('Mappa non disponibile: controlla la connessione e ricarica la pagina.', 'bad'); return; }
-  map.m = L.map('map', { zoomControl: false, attributionControl: true }).setView([41.9, 12.5], 6);
-  map.m.attributionControl.setPrefix(false);
-  setMapStyle(state.mapStyle);
+  applyTone();
+  if (!window.maplibregl) { toast('Mappa non disponibile: controlla la connessione e ricarica la pagina.', 'bad'); return; }
+  try {
+    map.m = new maplibregl.Map({
+      container: 'map', style: STYLES[state.mapStyle], center: [12.5, 41.9], zoom: 5,
+      attributionControl: { compact: true }, pitchWithRotate: false, dragRotate: false, touchPitch: false, maxZoom: 19,
+    });
+  } catch (err) {
+    console.warn(err);
+    toast('Questo telefono non riesce a disegnare la mappa.', 'bad'); return;
+  }
+  map.m.touchZoomRotate.disableRotation();
+  map.m.on('style.load', () => { addOverlay(); map.ready = true; updateMap(); });
   map.m.on('dragstart', () => { map.follow = false; });
-  map.m.on('click', () => { $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false'); });
-  map.m.on('click', e => { if (state.picking) setPending({ lat: e.latlng.lat, lon: e.latlng.lng }); });
+  map.m.on('click', e => {
+    $('#layersMenu').hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false');
+    if (state.picking) setPending({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+  });
   $('#recenterBtn').addEventListener('click', () => { map.follow = true; fitRadius(); });
-  setTimeout(() => map.m.invalidateSize(), 100);
+  document.querySelectorAll('#layersMenu button').forEach(b => b.classList.toggle('on', b.dataset.style === state.mapStyle));
+}
+
+// cerchio del raggio e linee verso chi è in chiamata: livelli disegnati sopra la mappa
+function circle(lat, lon, r, steps = 72) {
+  const pts = [], dLat = r / 111320, dLon = r / (111320 * Math.cos(lat * Math.PI / 180));
+  for (let i = 0; i <= steps; i++) { const a = i / steps * 2 * Math.PI; pts.push([lon + dLon * Math.cos(a), lat + dLat * Math.sin(a)]); }
+  return pts;
+}
+const EMPTY = { type: 'FeatureCollection', features: [] };
+function addOverlay() {
+  const m = map.m;
+  const accent = cssVar('--accent'), live = cssVar('--live'), warn = cssVar('--warn');
+  for (const id of ['radius', 'links']) if (!m.getSource(id)) m.addSource(id, { type: 'geojson', data: EMPTY });
+  const add = l => { if (!m.getLayer(l.id)) m.addLayer(l); };
+  add({ id: 'radius-fill', type: 'fill', source: 'radius', filter: ['==', ['get', 'k'], 'inner'], paint: { 'fill-color': accent, 'fill-opacity': 0.08 } });
+  add({ id: 'radius-line', type: 'line', source: 'radius', filter: ['==', ['get', 'k'], 'inner'], paint: { 'line-color': accent, 'line-width': 2.5 } });
+  add({ id: 'margin-line', type: 'line', source: 'radius', filter: ['==', ['get', 'k'], 'outer'], paint: { 'line-color': accent, 'line-width': 1.2, 'line-opacity': 0.5, 'line-dasharray': [2, 3] } });
+  add({ id: 'links-live', type: 'line', source: 'links', filter: ['==', ['get', 's'], 'live'], layout: { 'line-cap': 'round' }, paint: { 'line-color': live, 'line-width': 3, 'line-opacity': 0.8 } });
+  add({ id: 'links-wait', type: 'line', source: 'links', filter: ['==', ['get', 's'], 'connecting'], layout: { 'line-cap': 'round' }, paint: { 'line-color': warn, 'line-width': 2.5, 'line-opacity': 0.8, 'line-dasharray': [1, 2] } });
 }
 
 function fitRadius() {
-  if (!map.m || !map.margin) return;
-  map.m.fitBounds(map.margin.getBounds(), { paddingTopLeft: [16, 70], paddingBottomRight: [16, sheetH() + 10] });
+  if (!map.m || !state.lastPos) return;
+  const { lat, lon } = state.lastPos, r = state.radius * (1 + state.exitMargin);
+  const dLat = r / 111320, dLon = r / (111320 * Math.cos(lat * Math.PI / 180));
+  map.m.fitBounds([[lon - dLon, lat - dLat], [lon + dLon, lat + dLat]], { padding: pad(), duration: map.fitted ? 700 : 0, maxZoom: 17 });
 }
-function centerOn(latlng) {
-  // tiene il tuo punto al centro dell'area visibile, sopra il pannello
-  const pt = map.m.project(latlng).add([0, sheetH() / 2 - 30]);
-  map.m.panTo(map.m.unproject(pt));
+function flyToPoint(lat, lon) {
+  if (!map.m) return;
+  map.follow = false;
+  map.m.flyTo({ center: [lon, lat], zoom: Math.max(map.m.getZoom(), 16), padding: pad(), duration: 900 });
 }
 
-function pinIcon(cls, letter, label) {
-  return L.divIcon({
-    className: '', iconSize: [0, 0],
-    html: `<div class="pin ${cls}"><div class="dot">${esc(letter)}</div>${label ? `<div class="lbl">${esc(label)}</div>` : ''}</div>`,
-  });
+function pinEl(cls, letter, label) {
+  const el = document.createElement('div');
+  el.innerHTML = `<div class="pin ${cls}"><div class="dot">${esc(letter)}</div>${label ? `<div class="lbl">${esc(label)}</div>` : ''}</div>`;
+  return el;
 }
-function destIcon(label, pending) {
-  return L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="destpin${pending ? ' pending' : ''}"><div class="head"></div><div class="lbl">${esc(label)}</div></div>` });
+function destEl(label, pending) {
+  const el = document.createElement('div');
+  el.innerHTML = `<div class="destpin${pending ? ' pending' : ''}"><div class="head"></div><div class="lbl">${esc(label)}</div></div>`;
+  return el;
 }
+function marker(el, lat, lon) { return new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([lon, lat]).addTo(map.m); }
+
 function drawPending() {
   if (!map.m || !state.pending) return;
-  const ll = [state.pending.lat, state.pending.lon];
-  if (map.pendingMk) map.pendingMk.setLatLng(ll);
-  else map.pendingMk = L.marker(ll, { icon: destIcon('Nuova meta', true), zIndexOffset: 900, keyboard: false, interactive: false }).addTo(map.m);
+  if (map.pendingMk) map.pendingMk.setLngLat([state.pending.lon, state.pending.lat]);
+  else map.pendingMk = marker(destEl('Nuova meta', true), state.pending.lat, state.pending.lon);
 }
 function clearPending() {
   state.pending = null;
@@ -984,55 +1059,44 @@ function updateMap() {
   if (!map.m) return;
   // meta
   if (state.dest) {
-    const ll = [state.dest.lat, state.dest.lon], key = state.dest.label;
-    if (!map.destMk) { map.destMk = L.marker(ll, { icon: destIcon(key), zIndexOffset: 800, keyboard: false }).addTo(map.m); map.destMk._key = key; }
-    else { map.destMk.setLatLng(ll); if (map.destMk._key !== key) { map.destMk.setIcon(destIcon(key)); map.destMk._key = key; } }
+    const key = state.dest.label;
+    if (map.destMk && map.destMk._key !== key) { map.destMk.remove(); map.destMk = null; }
+    if (!map.destMk) { map.destMk = marker(destEl(key), state.dest.lat, state.dest.lon); map.destMk._key = key; }
+    else map.destMk.setLngLat([state.dest.lon, state.dest.lat]);
   } else if (map.destMk) { map.destMk.remove(); map.destMk = null; }
 
-  if (!state.lastPos) return;
-  const here = [state.lastPos.lat, state.lastPos.lon];
-  const accent = cssVar('--accent'), warn = cssVar('--warn'), live = cssVar('--live');
-  const outer = state.radius * (1 + state.exitMargin);
-
-  if (!map.me) {
-    map.radius = L.circle(here, { radius: state.radius, color: accent, weight: 2, fillColor: accent, fillOpacity: 0.07, interactive: false }).addTo(map.m);
-    map.margin = L.circle(here, { radius: outer, color: accent, weight: 1, opacity: 0.45, dashArray: '4 6', fill: false, interactive: false }).addTo(map.m);
-    map.me = L.marker(here, { icon: pinIcon('me', ''), zIndexOffset: 1000, keyboard: false, interactive: false }).addTo(map.m);
-  }
-  map.me.setLatLng(here);
-  map.radius.setLatLng(here).setRadius(state.radius);
-  map.margin.setLatLng(here).setRadius(outer);
-  if (!map.fitted) { fitRadius(); map.fitted = true; }
-  else if (map.follow && (!map.lastHere || distM({ lat: here[0], lon: here[1] }, map.lastHere) > 5)) centerOn(here);
-  map.lastHere = { lat: here[0], lon: here[1] };
-
-  const seen = new Set();
+  // persone
+  const seen = new Set(), links = [];
+  const here = state.lastPos && [state.lastPos.lon, state.lastPos.lat];
   for (const p of state.peers.values()) {
     if (p.lat == null || p.lon == null) continue;
     seen.add(p.id);
-    const [cls] = peerStatus(p), ll = [p.lat, p.lon];
+    const [cls] = peerStatus(p);
     const pinCls = cls + (p.music ? ' music' : '');
     const key = pinCls + '|' + p.name;
     let mk = map.markers.get(p.id);
-    if (!mk) {
-      mk = L.marker(ll, { icon: pinIcon(pinCls, (p.name[0] || '?').toUpperCase(), p.name), keyboard: false }).addTo(map.m);
-      mk._key = key; map.markers.set(p.id, mk);
-    } else {
-      mk.setLatLng(ll);
-      if (mk._key !== key) { mk.setIcon(pinIcon(pinCls, (p.name[0] || '?').toUpperCase(), p.name)); mk._key = key; }
-    }
-    let ln = map.lines.get(p.id);
-    if (cls === 'live' || cls === 'connecting') {
-      const color = cls === 'live' ? live : warn;
-      if (!ln) { ln = L.polyline([here, ll], { color, weight: 2.5, opacity: 0.75, dashArray: cls === 'live' ? null : '4 6', interactive: false }).addTo(map.m); map.lines.set(p.id, ln); }
-      else { ln.setLatLngs([here, ll]); ln.setStyle({ color, dashArray: cls === 'live' ? null : '4 6' }); }
-    } else if (ln) { ln.remove(); map.lines.delete(p.id); }
+    if (mk && mk._key !== key) { mk.remove(); mk = null; }
+    if (!mk) { mk = marker(pinEl(pinCls, (p.name[0] || '?').toUpperCase(), p.name), p.lat, p.lon); mk._key = key; map.markers.set(p.id, mk); }
+    else mk.setLngLat([p.lon, p.lat]);
+    if (here && (cls === 'live' || cls === 'connecting')) links.push({ type: 'Feature', properties: { s: cls }, geometry: { type: 'LineString', coordinates: [here, [p.lon, p.lat]] } });
   }
-  for (const [id, mk] of map.markers) {
-    if (seen.has(id)) continue;
-    mk.remove(); map.markers.delete(id);
-    const ln = map.lines.get(id); if (ln) { ln.remove(); map.lines.delete(id); }
+  for (const [id, mk] of map.markers) if (!seen.has(id)) { mk.remove(); map.markers.delete(id); }
+
+  if (!state.lastPos) return;
+  const { lat, lon } = state.lastPos;
+  if (!map.me) map.me = marker(pinEl('me', ''), lat, lon);
+  map.me.setLngLat([lon, lat]);
+
+  if (map.ready) {
+    map.m.getSource('radius')?.setData({ type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { k: 'inner' }, geometry: { type: 'Polygon', coordinates: [circle(lat, lon, state.radius)] } },
+      { type: 'Feature', properties: { k: 'outer' }, geometry: { type: 'LineString', coordinates: circle(lat, lon, state.radius * (1 + state.exitMargin)) } },
+    ] });
+    map.m.getSource('links')?.setData({ type: 'FeatureCollection', features: links });
   }
+  if (!map.fitted) { fitRadius(); map.fitted = true; }
+  else if (map.follow && (!map.lastHere || distM({ lat, lon }, map.lastHere) > 5)) map.m.easeTo({ center: [lon, lat], padding: pad(), duration: 600 });
+  map.lastHere = { lat, lon };
 }
 
 /* ---------------- mini finestra (PiP) ---------------- */
@@ -1058,7 +1122,7 @@ async function openPip() {
   try {
     if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return; }
     if (v.webkitPresentationMode === 'picture-in-picture') { v.webkitSetPresentationMode('inline'); return; }
-    if (v.paused) await v.play();
+    if (v.paused) v.play().catch(() => {});
     if (document.pictureInPictureEnabled && v.requestPictureInPicture) await v.requestPictureInPicture();
     else if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) v.webkitSetPresentationMode('picture-in-picture');
     else throw new Error('pip non supportato');
@@ -1067,7 +1131,7 @@ async function openPip() {
     toast('La mini finestra non è disponibile su questo browser.', 'bad');
   }
 }
-$('#pipBtn').addEventListener('click', () => { closeModals(); openPip(); });
+$('#pipBtn').addEventListener('click', async () => { await openPip(); closeModals(); });
 
 function drawPip() {
   const c = pctx, W = 640, H = 360;

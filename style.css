@@ -89,12 +89,35 @@ button{cursor:pointer}
 .fine{margin:0;color:var(--ink-3);font-size:13px;text-align:center}
 
 /* ---------------- chiamata ---------------- */
-.call{position:fixed;inset:0;overflow:hidden}
+.call{position:fixed;inset:0;overflow:hidden;color:var(--ink)}
 #map{position:absolute;inset:0;background:var(--bg)}
-.leaflet-container{font-family:var(--font);background:var(--bg)}
-.leaflet-bottom{bottom:var(--sheet-h)}
-.leaflet-control-attribution{font-size:10px;background:var(--glass-bg)!important;color:var(--ink-2)!important;border-radius:8px 0 0 0;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-.leaflet-control-attribution a{color:var(--accent)!important}
+.maplibregl-map{font-family:var(--font)}
+.maplibregl-ctrl-bottom-right,.maplibregl-ctrl-bottom-left{bottom:var(--sheet-h)}
+.maplibregl-ctrl-attrib{font-size:10.5px}
+.maplibregl-ctrl-attrib.maplibregl-compact{background:var(--glass-strong)!important;color:var(--ink-2)}
+.maplibregl-ctrl-attrib a{color:var(--ink-2)}
+
+/* i pannelli seguono il tono della mappa: chiari sulla mappa Standard, scuri su Scura e Satellite */
+.call[data-tone="light"]{
+  --ink:#0B1220; --ink-2:#394556; --ink-3:#5D6979;
+  --glass-bg:rgba(255,255,255,.80); --glass-strong:rgba(255,255,255,.93);
+  --glass-border:rgba(255,255,255,.95); --glass-hi:#FFFFFF; --glass-lo:rgba(255,255,255,.35);
+  --chip:rgba(11,18,32,.06); --chip-2:rgba(11,18,32,.10); --line:rgba(11,18,32,.10); --line-2:rgba(11,18,32,.20);
+  --accent:#1F5BF0; --accent-soft:rgba(31,91,240,.16); --live:#0E8A43; --warn:#B45309; --bad:#D92D32; --music:#6D3DF5; --dest:#E5412C; --on:#FFFFFF;
+  --shadow:0 8px 24px rgba(11,18,32,.16),0 1px 4px rgba(11,18,32,.10);
+  color-scheme:light;
+}
+.call[data-tone="dark"]{
+  --ink:#F4F6F9; --ink-2:#C9D1DB; --ink-3:#9AA6B4;
+  --glass-bg:rgba(17,21,28,.74); --glass-strong:rgba(17,21,28,.90);
+  --glass-border:rgba(255,255,255,.16); --glass-hi:rgba(255,255,255,.22); --glass-lo:rgba(255,255,255,.04);
+  --chip:rgba(255,255,255,.10); --chip-2:rgba(255,255,255,.16); --line:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.22);
+  --accent:#6B93FF; --accent-soft:rgba(107,147,255,.22); --live:#3DDC84; --warn:#FBBF24; --bad:#FF6B70; --music:#B39BFF; --dest:#FF7A66; --on:#06120B;
+  --shadow:0 12px 30px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+.call[data-tone="light"] .glass::before{background:linear-gradient(160deg,rgba(255,255,255,.6) 0%,rgba(255,255,255,.1) 30%,rgba(255,255,255,0) 60%)}
+.call[data-tone="dark"] .glass::before{background:linear-gradient(160deg,rgba(255,255,255,.14) 0%,rgba(255,255,255,.03) 30%,rgba(255,255,255,0) 60%)}
 
 .topbar{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;pointer-events:none}
 .topbar>*{pointer-events:auto}
@@ -116,9 +139,9 @@ button{cursor:pointer}
 .sw-sat{background:radial-gradient(circle at 30% 30%,#6C8F5A,#2F4A36 55%,#20364A)}
 
 /* persone in alto a sinistra */
-.people{position:absolute;z-index:1000;left:12px;top:calc(env(safe-area-inset-top,0px) + 66px);margin:0;padding:0;list-style:none;
-  display:grid;gap:8px;justify-items:start;max-height:calc(100% - var(--sheet-h) - 150px);overflow:auto;scrollbar-width:none}
-.people::-webkit-scrollbar{display:none}
+.people{position:absolute;z-index:1000;left:12px;top:calc(env(safe-area-inset-top,0px) + 68px);margin:0;padding:0;list-style:none;
+  display:grid;gap:8px;justify-items:start}
+.more{border:0;border-radius:999px;padding:8px 14px;font-weight:650;font-size:14px;color:var(--ink)}
 .person{display:flex;align-items:center;gap:4px;border-radius:999px;padding:5px;max-width:min(70vw,290px)}
 .pmain{display:flex;align-items:center;gap:10px;border:0;background:none;padding:0 10px 0 0;min-width:0;color:inherit;text-align:left}
 .spk{width:36px;height:36px;border-radius:50%;border:0;display:grid;place-items:center;flex:none;background:var(--chip);color:var(--ink)}
@@ -214,6 +237,9 @@ button{cursor:pointer}
 .modal{position:absolute;z-index:2000;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);margin:0 auto;max-width:520px;display:grid;gap:12px;
   background:var(--glass-strong);border-radius:38px;padding:20px 18px 18px;animation:up .24s cubic-bezier(.2,.9,.3,1.1)}
 .modal.tall{max-height:86vh;overflow:auto}
+/* la ricerca della meta sta in alto, così i risultati restano sopra la tastiera */
+.modal.top{top:calc(env(safe-area-inset-top,0px) + 8px);bottom:auto;animation:down .24s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes down{from{transform:translateY(-30px) scale(.98);opacity:.3}to{transform:none;opacity:1}}
 @keyframes up{from{transform:translateY(30px) scale(.98);opacity:.3}to{transform:none;opacity:1}}
 .modal h3{margin:0;font:700 21px/1.2 var(--font-d);letter-spacing:-.015em}
 .modalhead{display:flex;justify-content:space-between;align-items:center}
@@ -230,7 +256,7 @@ button{cursor:pointer}
 .searchbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .searchbox .ic{color:var(--ink-2);width:20px;height:20px}
 .searchbox input{flex:1;min-width:0;border:0;background:none;outline:none;padding:13px 0;font-size:17px}
-.results{list-style:none;margin:0;padding:0;display:grid;gap:2px;max-height:38vh;overflow:auto}
+.results{list-style:none;margin:0;padding:0;display:grid;gap:2px;max-height:42vh;overflow:auto}
 .results:empty{display:none}
 .results button{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;text-align:left;border:0;background:none;border-radius:20px;padding:10px 12px}
 .results button:hover,.results button:focus-visible{background:var(--chip)}
@@ -294,8 +320,8 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
 .destpin .lbl{position:absolute;top:6px;left:50%;transform:translateX(-50%);white-space:nowrap;font:700 12.5px/1.2 var(--font);color:#fff;background:var(--dest);padding:3px 8px;border-radius:9px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 .destpin.pending .head{opacity:.75}
 
-.tiles-std{filter:saturate(1.12) contrast(1.02)}
-#pipVideo{position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none}
+/* video della mini finestra: di dimensioni vere (su iPhone serve) ma nascosto dietro la mappa */
+#pipVideo{position:fixed;left:0;bottom:0;width:192px;height:108px;z-index:-1;pointer-events:none}
 #audioSinks{display:none}
 
 @media (prefers-reduced-motion:reduce){

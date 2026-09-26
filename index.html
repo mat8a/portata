@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon-180.png">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -75,14 +75,11 @@
     <div id="map" aria-label="Mappa"></div>
 
     <div class="topbar">
-      <button class="glass pill" id="roomPill" type="button" aria-label="Invita nella stanza">
+      <button class="glass pill" id="roomPill" type="button" aria-label="Invita qualcuno in questa stanza">
         <svg class="ic"><use href="#i-users"/></svg>
         <span class="mono" id="roomLabel">—</span>
-        <span class="sep"></span>
-        <span id="onlineCount">solo tu</span>
       </button>
       <div class="topbtns">
-        <button class="glass roundbtn" id="shareBtn" type="button" aria-label="Invita"><svg class="ic"><use href="#i-share"/></svg></button>
         <button class="glass roundbtn" id="layersBtn" type="button" aria-label="Stile della mappa" aria-expanded="false"><svg class="ic"><use href="#i-layers"/></svg></button>
         <button class="glass roundbtn" id="moreBtn" type="button" aria-label="Impostazioni"><svg class="ic"><use href="#i-sliders"/></svg></button>
       </div>
@@ -142,7 +139,7 @@
       </div>
     </section>
 
-    <section class="modal glass" id="destChoose" hidden aria-labelledby="chooseTitle">
+    <section class="modal glass top" id="destChoose" hidden aria-labelledby="chooseTitle">
       <h3 id="chooseTitle">Dove vi incontrate?</h3>
       <div class="searchbox">
         <svg class="ic"><use href="#i-search"/></svg>
@@ -161,11 +158,6 @@
       <div class="modalhead">
         <h3 id="navTitle">Apri le indicazioni con</h3>
         <button class="xbtn" id="navClose" type="button" aria-label="Chiudi"><svg class="ic"><use href="#i-x"/></svg></button>
-      </div>
-      <div class="seg" role="radiogroup" aria-label="Come ci vai">
-        <input type="radio" name="navMode" id="modeWalk" value="walk" checked><label for="modeWalk">A piedi</label>
-        <input type="radio" name="navMode" id="modeCar" value="car"><label for="modeCar">In auto</label>
-        <input type="radio" name="navMode" id="modeTransit" value="transit"><label for="modeTransit">Con i mezzi</label>
       </div>
       <div class="apps" id="navApps"></div>
       <label class="checkrow" for="navRemember"><input type="checkbox" id="navRemember" checked> Ricorda la scelta (la cambi nelle impostazioni)</label>
@@ -244,7 +236,7 @@
   <video id="pipVideo" muted playsinline autopictureinpicture></video>
   <div id="audioSinks" hidden></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

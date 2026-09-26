@@ -29,22 +29,24 @@ Chi si allontana esce dalla chiamata, chi si avvicina entra. Le persone si ritro
   libera; se la musica non riparte da sola, premi play dal Centro di Controllo. Se fai partire la
   musica mentre sei in chiamata, Portata se ne accorge e passa da sola alla modalità musica.
   Mescolare musica e voci richiede iOS 17 o successivo; va provato sul proprio telefono.
-- **Meta:** cerca un indirizzo o un posto (i risultati vicini a te vengono prima), oppure tocca un
+- **Meta:** cerca un indirizzo o un posto (i risultati vicini a te sono favoriti), oppure tocca un
   punto sulla mappa o usa la tua posizione; dagli un nome e condividilo. Tutti nella stanza la
   vedono, con la distanza di ognuno. Chiunque può cambiarla o toglierla. La ricerca usa
-  OpenStreetMap (Photon, e Nominatim come riserva) tramite il server, senza chiavi da configurare.
-- **Vai:** apre le indicazioni per la meta. La prima volta scegli l'app (Apple Mappe, Google Maps,
-  Waze) e come ci vai (a piedi, in auto, con i mezzi); con "Ricorda la scelta" le volte dopo si apre
-  direttamente. Si cambia in Impostazioni → App per le indicazioni.
+  OpenStreetMap (Photon, più Nominatim quando Photon trova poco) tramite il server; se il server
+  non risponde, il telefono chiede direttamente a Photon. Nessuna chiave da configurare.
+- **Vai:** apre le indicazioni stradali in auto verso la meta. La prima volta scegli l'app (Apple
+  Mappe, Google Maps, Waze); con "Ricorda la scelta" le volte dopo si apre direttamente. Si cambia
+  in Impostazioni → App per le indicazioni. Su iPhone Mappe e Google Maps si aprono con il loro
+  collegamento diretto (maps:// e comgooglemaps://).
 - **Tasti del volante e delle cuffie** (impostazioni, attivo di serie): il tasto play/pausa del
   volante (via Bluetooth), delle cuffie o degli AirPods accende e spegne il microfono. Sullo schermo
   dell'auto compare lo stato ("Microfono acceso · In chiamata con Giulia"). Funziona quando l'audio
   in riproduzione è Portata: se sta suonando Spotify, il tasto va a Spotify. Il tasto
   "rispondi/riaggancia" e CarPlay non sono raggiungibili da una web app.
 - **Stile della mappa** (icona a strati in alto): Standard (chiara e pulita, simile a Google Maps),
-  Scura, Satellite. Le mappe vengono da CARTO e, per il satellite, da Esri: sono
-  gratuite per un uso personale leggero; per un'app pubblica con molti utenti serve un piano con
-  chiave (per esempio MapTiler o Stadia Maps).
+  Scura, Satellite. La mappa è vettoriale (MapLibre) con gli stili gratuiti di OpenFreeMap, senza
+  chiave; il satellite usa le immagini Esri, gratuite per un uso personale. I pannelli in vetro
+  diventano chiari sulla mappa Standard e scuri sulle altre, per restare leggibili.
 - **Persone** (in alto a sinistra): toccane una per centrare la mappa su di lei. Con il tasto
   altoparlante accanto a chi è in chiamata la silenzi solo per te (lei continua a sentirti);
   la scelta si ricorda. Tutti gli altri si sentono sempre a volume pieno. Il tasto con la freccia,
